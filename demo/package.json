@@ -1,0 +1,28 @@
+{
+  "name": "isub-demo",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "iSub wallet-connect demo dApp — connect a Sui wallet (login), open an Account, subscribe to a plan, trigger a charge, and cancel — all non-custodially through the same @isub/sdk seam the keeper/CLI use.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mysten/dapp-kit-react": "^2.1.2",
+    "@mysten/sui": "^2.17.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "@vitejs/plugin-react": "^6.0.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  }
+}

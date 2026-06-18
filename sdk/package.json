@@ -1,0 +1,66 @@
+{
+  "name": "@isub/sdk",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "iSub — non-custodial recurring/metered pull-payment primitive on Sui. TS SDK + runnable scripts (e2e smoke, keeper).",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./agent": "./src/agent.ts",
+    "./biller": "./src/biller.ts",
+    "./service": "./src/service.ts",
+    "./webhook": "./src/webhook.ts",
+    "./store-file": "./src/store-file.ts",
+    "./db": "./src/db.ts",
+    "./sql-store": "./src/sql-store.ts",
+    "./gateway": "./src/gateway.ts",
+    "./client": "./src/client-sdk.ts",
+    "./mcp": "./src/mcp.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test:unit": "tsx scripts/unit.ts",
+    "publish:localnet": "tsx scripts/publish.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "keeper": "tsx scripts/keeper.ts",
+    "keeper:smoke": "tsx scripts/keeper-smoke.ts",
+    "payg:smoke": "tsx scripts/payg-smoke.ts",
+    "dunning:smoke": "tsx scripts/dunning-smoke.ts",
+    "agent:smoke": "tsx scripts/agent-smoke.ts",
+    "pricing:smoke": "tsx scripts/pricing-smoke.ts",
+    "webhook:smoke": "tsx scripts/webhook-smoke.ts",
+    "store:smoke": "NODE_OPTIONS=--experimental-sqlite tsx scripts/store-smoke.ts",
+    "biller:smoke": "NODE_OPTIONS=--experimental-sqlite tsx scripts/biller-smoke.ts",
+    "service:smoke": "tsx scripts/service-smoke.ts",
+    "mcp:smoke": "tsx scripts/mcp-smoke.ts",
+    "wiring:e2e": "tsx scripts/wiring-e2e.ts",
+    "wiring-e2e:testnet": "ISUB_NETWORK=testnet tsx scripts/wiring-e2e.ts",
+    "managed-e2e": "NODE_OPTIONS=--experimental-sqlite tsx scripts/managed-e2e.ts",
+    "managed-e2e:testnet": "ISUB_NETWORK=testnet NODE_OPTIONS=--experimental-sqlite tsx scripts/managed-e2e.ts",
+    "reconcile": "tsx scripts/reconcile.ts",
+    "probe:testnet": "tsx scripts/grpc-probe.ts",
+    "fund:testnet": "ISUB_NETWORK=testnet tsx scripts/fund.ts",
+    "publish:testnet": "ISUB_NETWORK=testnet tsx scripts/publish.ts",
+    "smoke:testnet": "ISUB_NETWORK=testnet tsx scripts/smoke.ts",
+    "keeper:testnet": "ISUB_NETWORK=testnet tsx scripts/keeper.ts",
+    "keeper-smoke:testnet": "ISUB_NETWORK=testnet tsx scripts/keeper-smoke.ts",
+    "payg-smoke:testnet": "ISUB_NETWORK=testnet tsx scripts/payg-smoke.ts",
+    "dunning-smoke:testnet": "ISUB_NETWORK=testnet tsx scripts/dunning-smoke.ts",
+    "agent-smoke:testnet": "ISUB_NETWORK=testnet tsx scripts/agent-smoke.ts",
+    "pricing-smoke:testnet": "ISUB_NETWORK=testnet tsx scripts/pricing-smoke.ts",
+    "reconcile:testnet": "ISUB_NETWORK=testnet tsx scripts/reconcile.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@mysten/sui": "^2.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

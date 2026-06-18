@@ -1,0 +1,16 @@
+[package]
+name = "isub_pk"
+edition = "2024.beta"
+
+# ⚠️ ALTERNATE / SPIKE PACKAGE — does not touch the canonical `contracts/` package.
+# Identical module (`isub::subscription`) + public ABI; the only difference is that the
+# private `settle()` routes the merchant payment through the official Sui Payment Kit
+# (ephemeral payment → on-chain PaymentReceipt event). SDK is compatible by packageId swap.
+
+[dependencies]
+# Sui / MoveStdlib auto-injected by the CLI (same as the canonical package; payment_kit
+# also auto-injects its framework, so no Sui-rev conflict).
+payment_kit = { git = "https://github.com/MystenLabs/sui-payment-kit.git", rev = "main" }
+
+[addresses]
+isub = "0x0"

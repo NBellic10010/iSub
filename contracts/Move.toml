@@ -1,0 +1,8 @@
+[package]
+name = "isub"
+edition = "2024.beta"
+
+# Sui / MoveStdlib 框架由 CLI 按本机版本自动注入（无需显式依赖，避免 rev 不匹配）。
+
+[addresses]
+isub = "0x0"

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ephemeral localnet deployment record (re-created by `npm run publish:localnet`)
+isub.localnet.json
+
+# persistent actor keypairs for public networks — SECRET, never commit
+.secrets/
+
+# keeper runtime state (watch set, journal, lock)
+.keeper/
+
+# captured test/run logs (regenerable; reference ephemeral localnet package ids)
+logs/

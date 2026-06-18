@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["vite/client", "node"],
+    "paths": {
+      "@isub/sdk": ["../sdk/src/index.ts"],
+      // Dedupe @mysten/sui types onto THIS package's single copy (program-wide, incl. the
+      // aliased SDK source) so a Transaction/Client from the SDK and from dApp-kit share one
+      // branded declaration. Vite's resolve.dedupe does the same at runtime.
+      "@mysten/sui/*": ["./node_modules/@mysten/sui/dist/*/index.d.mts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

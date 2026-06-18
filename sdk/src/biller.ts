@@ -1,0 +1,403 @@
+// `IsubBiller` — the supply-side PAYG settlement pipeline (the service/merchant that
+// METERS usage and pulls `charge_metered` within a mandate's caps). Complements
+// `./agent` (the demand side that authorizes mandates).
+//
+// Pipeline: recordUsage (idempotent ingest, dedup by usageId) → accumulate off-chain →
+// flush (per-mandate SINGLE-FLIGHT: clamp to spendable, charge within caps, carry the
+// rest). Aggregating keeps micro-metering viable on-chain (one settlement per window,
+// not one tx per call).
+//
+// MONEY-CORRECTNESS (G1: bill each record at most once, even across lost acks / crashes):
+// a charge that lands on-chain advances `charge_seq` irreversibly, but the off-chain
+// "mark billed" can't be atomic with it. So before every charge the biller RECONCILES:
+// if the journal has a `submit` at seq S with no matching `charged` AND the on-chain
+// charge_seq has moved past S, that submit LANDED — its records are marked billed (a
+// `charged` entry is back-filled) instead of charging again. Reconcile runs at the top
+// of every attempt, closing both the cross-flush crash gap and the in-loop delayed-ack
+// race. Assumes ONE biller per mandate (enforced by the store lock).
+//
+// Depends only on a narrow `BillerChain` (which `IsubClient` satisfies) + a `BillerStore`
+// (mem for tests, SQL for prod) → the whole pipeline is unit-testable with no chain.
+import { ChargeMode, MandateStatus } from './constants';
+import type { MandateState, AccountState } from './types';
+import type { IsubSigner } from './signer';
+import { IsubAbortError, IsubError } from './errors';
+import type { JournalEntry } from './store';
+import { priceUsageMulti, assertValidRateCard, type RateCard } from './pricing';
+
+const E_BAD_SEQ = 20;
+const E_OVER_RATE_CAP = 8;
+const E_OVER_BUDGET = 9;
+const E_INSUFFICIENT = 10;
+const E_OVER_PER_CHARGE = 24;
+
+export interface UsageRow {
+  usageId: string;
+  mandateId: string;
+  /** The FROZEN charge for this record (priced once at ingest). Settle/recoverOrphan read ONLY this. */
+  amount: bigint;
+  atMs: number;
+  // Provenance (audit only; NEVER a billing input) — set by the priced `recordMeteredUsage` path.
+  /** The meter this was priced on ('multi' when >1 meter line). */
+  meterKey?: string;
+  /** Reported quantity (undefined for a multi-meter record). */
+  qty?: bigint;
+  /** RateCard.version this was priced against. */
+  rateCardVersion?: number;
+}
+
+/**
+ * Persistence for usage records + the charge journal. `recordUsage` returns false on a
+ * duplicate usageId. Optional `acquireLock`/`releaseLock` give cross-instance single-flight
+ * (so two biller processes can't bill the same mandate set) — implement them in production.
+ */
+export interface BillerStore {
+  recordUsage(u: UsageRow): Promise<boolean>;
+  unbilled(mandateId: string): Promise<UsageRow[]>;
+  markBilled(usageIds: string[]): Promise<void>;
+  mandatesWithUnbilled(): Promise<string[]>;
+  appendJournal(e: JournalEntry): Promise<void>;
+  readJournal(): Promise<JournalEntry[]>;
+  acquireLock?(): Promise<void>;
+  releaseLock?(): Promise<void>;
+}
+
+/** The slice of `IsubClient` the biller needs — so a faithful mock can stand in for the chain. */
+export interface BillerChain {
+  getMandate(id: string): Promise<MandateState>;
+  getAccount(id: string): Promise<AccountState>;
+  chargeMetered(signer: IsubSigner, p: { accountId: string; mandateId: string; amount: bigint; seq: bigint }): Promise<{ digest: string }>;
+}
+
+export type CarryReason = 'budget_exhausted' | 'rate_limited' | 'insufficient_balance' | 'per_charge_too_small' | 'not_billable';
+
+export type BillerEvent =
+  | { type: 'charge.succeeded'; mandateId: string; at: number; amount: bigint; digest: string; seq: number }
+  | { type: 'charge.failed'; mandateId: string; at: number; error: string; deterministic: boolean; abortCode: number | null }
+  | { type: 'usage.carried'; mandateId: string; at: number; amount: bigint; reason: CarryReason }
+  | { type: 'budget.threshold'; mandateId: string; at: number; pct: number }
+  | { type: 'budget.exhausted'; mandateId: string; at: number }
+  | { type: 'mandate.expired'; mandateId: string; at: number };
+
+export interface FlushResult {
+  mandateId: string;
+  charged: bigint;
+  carried: bigint;
+  digest?: string;
+  reason?: CarryReason | 'charged' | 'skipped';
+}
+
+export interface BillerPolicy {
+  /** Emit `budget.threshold` once spent crosses this % of total_budget (default 80; 0 disables). */
+  thresholdPct?: number;
+  /** Max attempts per flush (re-read + shrink/recover on contention/over-cap). Default 5. */
+  maxRetries?: number;
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const min = (...xs: bigint[]): bigint => xs.reduce((a, b) => (a < b ? a : b));
+
+/**
+ * How much can be pulled from this mandate RIGHT NOW = min(remaining budget, remaining
+ * rate-window, per-charge cap, account balance) — 0 if paused/revoked/expired or before
+ * the first-charge window. The chain re-enforces all of this; this only avoids gas on aborts.
+ */
+export function spendableNow(m: MandateState, accountBalance: bigint, nowMs: number): bigint {
+  const now = BigInt(nowMs);
+  if (m.status !== MandateStatus.Active) return 0n;
+  if (now >= m.expiryMs || now < m.notBeforeMs) return 0n;
+  const budgetLeft = m.totalBudget > m.spentTotal ? m.totalBudget - m.spentTotal : 0n;
+  const windowLeft = now >= m.windowStartMs + m.rateWindowMs ? m.rateCap : m.rateCap > m.windowSpent ? m.rateCap - m.windowSpent : 0n;
+  return min(budgetLeft, windowLeft, m.maxPerCharge, accountBalance);
+}
+
+export class IsubBiller {
+  private readonly thresholdPct: number;
+  private readonly maxRetries: number;
+  private readonly inflight = new Map<string, Promise<unknown>>(); // per-mandate in-process serialization
+  private readonly thresholdFired = new Set<string>();
+  private readonly onEvent?: (e: BillerEvent) => void;
+  /** Optional merchant price list. When set, `recordMeteredUsage` prices raw quantities against it. */
+  private readonly rateCard?: RateCard;
+  private initialized = false;
+
+  constructor(
+    private readonly chain: BillerChain,
+    private readonly signer: IsubSigner,
+    private readonly store: BillerStore,
+    opts: { policy?: BillerPolicy; onEvent?: (e: BillerEvent) => void; rateCard?: RateCard } = {},
+  ) {
+    this.thresholdPct = opts.policy?.thresholdPct ?? 80;
+    this.maxRetries = opts.policy?.maxRetries ?? 5;
+    this.onEvent = opts.onEvent;
+    if (opts.rateCard) assertValidRateCard(opts.rateCard); // malformed card fails at startup, not at ingest
+    this.rateCard = opts.rateCard;
+  }
+
+  /** Take the cross-instance billing lock (if the store provides one). Lazy-called by flush. */
+  async init(): Promise<void> {
+    if (this.initialized) return;
+    await this.store.acquireLock?.();
+    this.initialized = true;
+  }
+  /** Release the lock. */
+  async close(): Promise<void> {
+    await this.store.releaseLock?.();
+  }
+
+  private emit(e: BillerEvent): void {
+    try {
+      this.onEvent?.(e);
+    } catch {
+      /* listener errors never break billing */
+    }
+  }
+
+  /** Idempotent ingest: dedups by usageId, accumulates off-chain. A retried report is a no-op. */
+  async recordUsage(u: { mandateId: string; amount: bigint; usageId: string; atMs?: number }): Promise<void> {
+    if (u.amount <= 0n) throw new IsubError('usage', 'usage amount must be positive');
+    await this.store.recordUsage({ usageId: u.usageId, mandateId: u.mandateId, amount: u.amount, atMs: u.atMs ?? Date.now() });
+  }
+
+  /**
+   * Priced ingest: report RAW quantities (1+ meter lines under ONE usageId); the RateCard prices
+   * them ONCE here, freezes the bigint, and feeds the SAME `recordUsage` dedup path. The card is
+   * never read again — settle/recoverOrphan see only the frozen `amount`, so a later card edit can
+   * never re-price this record. A retried report (same usageId) is a no-op and is NOT re-priced.
+   */
+  async recordMeteredUsage(u: {
+    mandateId: string;
+    usageId: string;
+    items: ReadonlyArray<{ meterKey: string; qty: bigint }>;
+    atMs?: number;
+  }): Promise<void> {
+    if (!this.rateCard) throw new IsubError('config', 'no rate card configured on this biller');
+    const { amount, lines, cardVersion } = priceUsageMulti(this.rateCard, u.items); // price once, freeze
+    if (amount <= 0n) throw new IsubError('usage', 'priced amount must be positive'); // never store an un-billable phantom row
+    await this.store.recordUsage({
+      usageId: u.usageId,
+      mandateId: u.mandateId,
+      amount,
+      atMs: u.atMs ?? Date.now(),
+      meterKey: lines.length === 1 ? lines[0]!.meterKey : 'multi',
+      qty: lines.length === 1 ? lines[0]!.qty : undefined,
+      rateCardVersion: cardVersion,
+    });
+  }
+
+  /** What this mandate can be charged right now (the pre-flight ceiling). */
+  async spendable(mandateId: string): Promise<bigint> {
+    const m = await this.chain.getMandate(mandateId);
+    const acct = await this.chain.getAccount(m.accountId);
+    return spendableNow(m, acct.balance, Date.now());
+  }
+
+  /** Settle one mandate (or all with unbilled usage). Per-mandate single-flight. */
+  async flush(mandateId?: string, nowMs: number = Date.now()): Promise<FlushResult[]> {
+    await this.init();
+    const ids = mandateId ? [mandateId] : await this.store.mandatesWithUnbilled();
+    return Promise.all(ids.map((id) => this.flushOne(id, nowMs)));
+  }
+
+  private flushOne(mandateId: string, nowMs: number): Promise<FlushResult> {
+    const prev = this.inflight.get(mandateId) ?? Promise.resolve();
+    const next = prev.catch(() => undefined).then(() => this.settle(mandateId, nowMs));
+    this.inflight.set(mandateId, next);
+    return next;
+  }
+
+  private async settle(mandateId: string, nowMs: number): Promise<FlushResult> {
+    let totalCharged = 0n;
+    let carried = 0n;
+    let lastFailure: { error: string; code: number | null } | null = null;
+
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      // (0) Reconcile any landed-but-unrecorded prior charge BEFORE new billing — closes the
+      //     lost-ack / crash double-charge gap. Marks those records billed; never re-charges.
+      totalCharged += await this.recoverOrphan(mandateId, nowMs);
+
+      const unbilled = await this.store.unbilled(mandateId);
+      if (unbilled.length === 0) {
+        return { mandateId, charged: totalCharged, carried: 0n, reason: totalCharged > 0n ? 'charged' : 'skipped' };
+      }
+      carried = unbilled.reduce((s, r) => s + r.amount, 0n);
+
+      const m = await this.chain.getMandate(mandateId);
+      if (m.mode !== ChargeMode.Payg) return { mandateId, charged: totalCharged, carried, reason: 'not_billable' };
+      if (BigInt(nowMs) >= m.expiryMs) {
+        this.emit({ type: 'mandate.expired', mandateId, at: nowMs });
+        return { mandateId, charged: totalCharged, carried, reason: 'not_billable' };
+      }
+      if (m.status !== MandateStatus.Active) {
+        // Revoked/paused — can't bill (chain would abort #4 anyway). Signal it clearly so the
+        // service stops serving, instead of falling through to a misleading 'rate_limited' carry.
+        this.emitCarry(mandateId, carried, 'not_billable', nowMs);
+        return { mandateId, charged: totalCharged, carried, reason: 'not_billable' };
+      }
+      const acct = await this.chain.getAccount(m.accountId);
+      const spendable = spendableNow(m, acct.balance, nowMs);
+
+      // Greedily take whole records (oldest first) up to `spendable`; the rest carries.
+      const batch: UsageRow[] = [];
+      let sum = 0n;
+      for (const r of unbilled) {
+        if (sum + r.amount > spendable) break;
+        batch.push(r);
+        sum += r.amount;
+      }
+      if (sum === 0n) {
+        const reason = carryReason(m, acct.balance, unbilled[0]!.amount, nowMs);
+        this.emitCarry(mandateId, carried, reason, nowMs);
+        return { mandateId, charged: totalCharged, carried, reason };
+      }
+
+      const seq = m.chargeSeq;
+      await this.store.appendJournal({ at: nowMs, mandateId, kind: 'submit', amount: sum.toString(), seq: Number(seq) });
+      try {
+        const { digest } = await this.chain.chargeMetered(this.signer, { accountId: m.accountId, mandateId, amount: sum, seq });
+        // Charge landed. Commit OUTSIDE the abort-handling try: a markBilled/journal failure
+        // here means the charge LANDED but wasn't recorded → an orphan the next attempt's
+        // recoverOrphan repairs, NOT a charge failure. Let it propagate.
+        await this.commitCharge(mandateId, batch, sum, Number(seq) + 1, digest, nowMs, m);
+        totalCharged += sum;
+        if (sum === carried) return { mandateId, charged: totalCharged, carried: 0n, digest, reason: 'charged' };
+        continue; // more pending (rate/per-charge limited) → next attempt
+      } catch (e) {
+        const code = e instanceof IsubAbortError ? e.abortCode : null;
+        if (code === E_OVER_RATE_CAP || code === E_OVER_BUDGET || code === E_OVER_PER_CHARGE) {
+          continue; // abort ⇒ nothing landed (rollback); re-read, shrink batch next attempt
+        }
+        if (code === E_INSUFFICIENT) {
+          this.emitCarry(mandateId, carried, 'insufficient_balance', nowMs);
+          return { mandateId, charged: totalCharged, carried, reason: 'insufficient_balance' };
+        }
+        // EBadChargeSeq OR transient (non-abort): the charge MAY have landed. Don't re-derive a
+        // fresh seq here — the next attempt's recoverOrphan resolves it from the chain seq.
+        lastFailure = { error: e instanceof Error ? e.message : String(e), code };
+        continue;
+      }
+    }
+    // Retries exhausted. A lingering non-abort failure (RPC down) is a real failure to surface;
+    // otherwise it's sustained rate/contention and the rest simply carries.
+    if (lastFailure) {
+      await this.store.appendJournal({ at: nowMs, mandateId, kind: 'fail', reason: lastFailure.error });
+      this.emit({ type: 'charge.failed', mandateId, at: nowMs, error: lastFailure.error, deterministic: lastFailure.code !== null, abortCode: lastFailure.code });
+      return { mandateId, charged: totalCharged, carried, reason: undefined };
+    }
+    this.emitCarry(mandateId, carried, 'rate_limited', nowMs);
+    return { mandateId, charged: totalCharged, carried, reason: totalCharged > 0n ? 'charged' : 'rate_limited' };
+  }
+
+  /**
+   * If a prior `submit` at seq S has no matching `charged` and the on-chain charge_seq has
+   * advanced past S, that charge LANDED (single-charger invariant) but wasn't recorded.
+   * Mark the oldest unbilled prefix summing to the submit amount as billed + back-fill a
+   * `charged` entry. Returns the recovered amount (0 if nothing to recover).
+   */
+  private async recoverOrphan(mandateId: string, nowMs: number): Promise<bigint> {
+    const mine = (await this.store.readJournal()).filter((e) => e.mandateId === mandateId && e.seq != null);
+    const settledSubmitSeqs = new Set(mine.filter((e) => e.kind === 'charged').map((e) => e.seq! - 1));
+    const orphan = [...mine].reverse().find((e) => e.kind === 'submit' && !settledSubmitSeqs.has(e.seq!));
+    if (!orphan || orphan.amount == null) return 0n;
+
+    const m = await this.chain.getMandate(mandateId);
+    if (Number(m.chargeSeq) <= orphan.seq!) return 0n; // submit did NOT land — normal flow re-charges it
+
+    const target = BigInt(orphan.amount);
+    const unbilled = await this.store.unbilled(mandateId);
+    const batch: UsageRow[] = [];
+    let sum = 0n;
+    for (const r of unbilled) {
+      if (sum >= target) break;
+      batch.push(r);
+      sum += r.amount;
+    }
+    if (sum !== target) {
+      // Can't map the landed charge back to whole records — surface for manual reconcile,
+      // don't guess (guessing could under/over-bill).
+      await this.store.appendJournal({ at: nowMs, mandateId, kind: 'fail', reason: `recover: landed ${target} but unbilled prefix=${sum} — manual reconcile` });
+      return 0n;
+    }
+    await this.store.markBilled(batch.map((r) => r.usageId));
+    await this.store.appendJournal({ at: nowMs, mandateId, kind: 'charged', amount: target.toString(), seq: orphan.seq! + 1, reason: 'recovered' });
+    this.emit({ type: 'charge.succeeded', mandateId, at: nowMs, amount: target, digest: 'recovered', seq: orphan.seq! + 1 });
+    return target;
+  }
+
+  private async commitCharge(mandateId: string, batch: UsageRow[], sum: bigint, newSeq: number, digest: string | undefined, nowMs: number, m: MandateState): Promise<void> {
+    await this.store.markBilled(batch.map((r) => r.usageId));
+    await this.store.appendJournal({ at: nowMs, mandateId, kind: 'charged', amount: sum.toString(), seq: newSeq, digest });
+    this.emit({ type: 'charge.succeeded', mandateId, at: nowMs, amount: sum, digest: digest ?? 'recovered', seq: newSeq });
+    this.maybeThreshold(mandateId, m.spentTotal + sum, m.totalBudget, nowMs);
+  }
+
+  private emitCarry(mandateId: string, amount: bigint, reason: CarryReason, nowMs: number): void {
+    if (amount <= 0n) return;
+    this.emit({ type: 'usage.carried', mandateId, at: nowMs, amount, reason });
+    if (reason === 'budget_exhausted') this.emit({ type: 'budget.exhausted', mandateId, at: nowMs });
+  }
+
+  private maybeThreshold(mandateId: string, spent: bigint, budget: bigint, nowMs: number): void {
+    if (this.thresholdPct <= 0 || budget === 0n || this.thresholdFired.has(mandateId)) return;
+    const pct = Number((spent * 100n) / budget);
+    if (pct >= this.thresholdPct) {
+      this.thresholdFired.add(mandateId);
+      this.emit({ type: 'budget.threshold', mandateId, at: nowMs, pct });
+    }
+  }
+
+  /** Poll: flush all mandates with unbilled usage every `pollMs` until aborted. */
+  async run(opts: { pollMs: number; signal?: AbortSignal; onTick?: (r: FlushResult[]) => void }): Promise<void> {
+    while (!opts.signal?.aborted) {
+      try {
+        opts.onTick?.(await this.flush());
+      } catch (e) {
+        console.error('biller: flush failed:', e instanceof Error ? e.message : e);
+      }
+      await sleep(opts.pollMs);
+    }
+    await this.close();
+  }
+}
+
+/** Why a (sub-spendable) charge couldn't be made — for the carried event. Uses the just-read mandate. */
+function carryReason(m: MandateState, balance: bigint, firstRecord: bigint, nowMs: number): CarryReason {
+  const now = BigInt(nowMs);
+  if (m.spentTotal >= m.totalBudget) return 'budget_exhausted';
+  if (now < m.windowStartMs + m.rateWindowMs && m.windowSpent >= m.rateCap) return 'rate_limited';
+  if (balance < firstRecord || balance === 0n) return 'insufficient_balance';
+  if (firstRecord > m.maxPerCharge) return 'per_charge_too_small';
+  return 'rate_limited';
+}
+
+// ===== in-memory BillerStore (tests/demos; SQL impl is `sqlBillerStore` in ./sql-store) =====
+
+export function memBillerStore(): BillerStore {
+  const usage: UsageRow[] = [];
+  const billed = new Set<string>();
+  const seen = new Set<string>();
+  const journal: JournalEntry[] = [];
+  return {
+    async recordUsage(u) {
+      if (seen.has(u.usageId)) return false;
+      seen.add(u.usageId);
+      usage.push(u);
+      return true;
+    },
+    async unbilled(mandateId) {
+      return usage.filter((u) => u.mandateId === mandateId && !billed.has(u.usageId)).sort((a, b) => a.atMs - b.atMs || a.usageId.localeCompare(b.usageId));
+    },
+    async markBilled(ids) {
+      for (const id of ids) billed.add(id);
+    },
+    async mandatesWithUnbilled() {
+      return [...new Set(usage.filter((u) => !billed.has(u.usageId)).map((u) => u.mandateId))];
+    },
+    async appendJournal(e) {
+      journal.push(e);
+    },
+    async readJournal() {
+      return [...journal];
+    },
+  };
+}

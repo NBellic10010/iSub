@@ -1,0 +1,5 @@
+{
+  "packageId": "0xb11a3defcf0edb190edcf17aab87946a78ff514b1c547ff02dc5444b093bce7a",
+  "network": "testnet",
+  "baseUrl": "https://fullnode.testnet.sui.io:443"
+}
