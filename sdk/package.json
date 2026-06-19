@@ -36,6 +36,8 @@
     "store:smoke": "NODE_OPTIONS=--experimental-sqlite tsx scripts/store-smoke.ts",
     "biller:smoke": "NODE_OPTIONS=--experimental-sqlite tsx scripts/biller-smoke.ts",
     "scheduler:smoke": "NODE_OPTIONS=--experimental-sqlite tsx scripts/scheduler-smoke.ts",
+    "scheduler-e2e": "tsx scripts/scheduler-e2e.ts",
+    "scheduler-e2e:testnet": "ISUB_NETWORK=testnet tsx scripts/scheduler-e2e.ts",
     "service:smoke": "tsx scripts/service-smoke.ts",
     "mcp:smoke": "tsx scripts/mcp-smoke.ts",
     "wiring:e2e": "tsx scripts/wiring-e2e.ts",

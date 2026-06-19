@@ -135,7 +135,8 @@
   - step 1–3：`sdk/src/scheduler.ts` —— `SchedulePhase`/`Schedule` 模型、`memoryScheduleStore`、`IsubScheduler`（`schedule`/`tick`/`applyConsent`/`cancel`）。四类执行器全实现。signer=**商家**（refund 仅 merchant）；revoke 旧 mandate 是订阅者动作（其 consent PTB 内）。已并入 core index。
   - step 4：`scripts/scheduler-smoke.ts` —— 离线假链回归：静默降级（基线/幂等/批量退差额）、升级 consent gate（停旧价→`applyConsent`→换 mandate）、PAYG reprice 事件、试用→付费。**consent gate neuter→4 红**（证明咬得住；注：链上 price 仍 UNCHANGED——合约才是 over-pull 真边界，gate 管的是状态建模+催签）。
   - step 1b：`sqlScheduleStore`（`sql-store.ts` + `db.ts` 新 `schedules` 表）—— 多租户（`merchant_id` 行隔离）、单实例锁（复用 `makeLock`）、phases 的 bigint 用 `{"$b":"…"}` 编码显式 round-trip（含嵌套 rateCard meter）。smoke 加 8 条 SQL 断言（重启 reload cursor/status/退款锚、bigint 往返、租户隔离、锁）。**scheduler-smoke 共 31 断言（23 mem + 8 SQL）全绿**。
-- **仍待办**：step 5 testnet e2e（真链跑 downgrade refund + upgrade consent）。
+  - step 5：`scripts/scheduler-e2e.ts`（`npm run scheduler-e2e:testnet`）—— **testnet 真链 22 断言通过**。一条完整订阅调整弧线：标准→忠诚(静默退差额，真 refund tx，period2 净=低价、refunded_total=delta、无新签)→Pro(`tick`→`consent.required`+链上 price UNCHANGED 不 over-pull→签新 mandate+revoke 旧→`applyConsent` 换 id→Pro 满额扣)。总付=标准+忠诚+Pro，`withdraw_all` 非托管退出归零。`scheduler.tick(nowMs)` 用逻辑时间驱动 phase 边界，只有链上 interval 闸需真等 1 个周期。
+- **A 全部完成**（合约一行未改）。后续若要"产品化"：接 managed backend（gateway API + webhook 把 `consent.required` 推给前端）、dashboard 展示 phase 时间线。B（链上 phase 向量）仍是 roadmap，等"静默涨价"成真需求。
 
 ### 下一轮（Phase 2.2+，打通之后）
 
