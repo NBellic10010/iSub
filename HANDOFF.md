@@ -129,9 +129,12 @@
 决策：**A（纯链下编排器，合约不动）现在做；B（链上 phase 向量预签，要改合约+重审）作 roadmap**。二者不互斥——A 的编排器就是 B 的地基。完整规格见 **`product-plan/scheduler-design.md`**。
 
 - **铁律**：签名是天花板，商家只能拉更少、永不更多，除非新签名。→ 四类转换：试用/降级/PAYG改价**免签**；**涨价=consent 事件必须新签**（A 唯一做不到"静默涨价"，那要上 B）。
-- **step 0 已完成**：keeper `not_before` 修复（`keeper.ts`：`earliest = max(last+interval, not_before)`）。修前试用期每 tick 发一笔注定 `EIntervalNotElapsed` 的 charge（烧 gas+刷 journal）。回归 `unit.ts › keeper not_before`（neuter→3 红，restore→绿，**83 unit 全绿**）。`self-audit.md` 对应追踪项已标 Resolved。
-- **待拍板**（写 step 1 前）：降级默认（静默退差额 vs 重签低价）/ 升级 consent 呈现方式 / 编排器定位（并列 vs 驱动）/ phase 时间（绝对 ms vs 相对事件）。推荐组合写在 design 文档 §6。
-- **施工顺序**：step1 `ScheduleStore` → step2 `IsubScheduler` 核心 → step3 四类执行器 → step4 `scheduler-smoke` → step5 testnet e2e。
+- **决策已拍板**：①降级=**静默退差额**（每期 charge 后 refund 差额，按 charge_seq 幂等）②升级=**`onConsentRequired` 回调**（签字前停旧价）③编排器**并列**只管 phase 边界 ④phase 时间=**绝对 ms**。详见 design §6。
+- **step 0–4 已完成**（`scheduler` 分支）：
+  - step 0：keeper `not_before` 修复（`keeper.ts`：`earliest = max(last+interval, not_before)`）。修前试用期每 tick 发一笔注定 `EIntervalNotElapsed` 的 charge（烧 gas+刷 journal）。回归 `unit.ts › keeper not_before`（neuter→3 红）。`self-audit` 对应追踪项已标 Resolved。
+  - step 1–3：`sdk/src/scheduler.ts` —— `SchedulePhase`/`Schedule` 模型、`memoryScheduleStore`、`IsubScheduler`（`schedule`/`tick`/`applyConsent`/`cancel`）。四类执行器全实现。signer=**商家**（refund 仅 merchant）；revoke 旧 mandate 是订阅者动作（其 consent PTB 内）。已并入 core index。
+  - step 4：`scripts/scheduler-smoke.ts` —— 离线假链 **23 断言**：静默降级（基线/幂等/批量退差额）、升级 consent gate（停旧价→`applyConsent`→换 mandate）、PAYG reprice 事件、试用→付费。**consent gate neuter→4 红**（证明咬得住；注：链上 price 仍 UNCHANGED——合约才是 over-pull 真边界，gate 管的是状态建模+催签）。
+- **仍待办**：step 1b `ScheduleStore` 的 **SQL 实现**（memory 非生产用）、step 5 testnet e2e（真链跑 downgrade refund + upgrade consent）。
 
 ### 下一轮（Phase 2.2+，打通之后）
 

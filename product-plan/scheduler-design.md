@@ -7,7 +7,7 @@
 
 | | 选择 | 状态 |
 |---|---|---|
-| **架构 A** —— 纯链下 Schedule 编排器，合约不动 | ✅ **现在做** | 设计冻结中；step 0 已完成 |
+| **架构 A** —— 纯链下 Schedule 编排器，合约不动 | ✅ **现在做** | **step 0–4 完成**（核心 + 离线回归）；SQL store + testnet e2e 待办 |
 | **架构 B** —— 把 phase 价目向量预签进 Mandate，合约改 | 📋 **roadmap** | 等"无用户动作的涨价"成为真需求再上 |
 
 二者不互斥：**A 的编排器（phase 时间表、转换调度、降级退差额、PAYG 换卡）就是 B 的地基**。
@@ -144,21 +144,24 @@ A 默认走静默退差额（拿"零动作"），把毛额预算瑕疵记为 v1 
 
 | step | 内容 | 产物 | 状态 |
 |---|---|---|---|
-| 0 | keeper `not_before` 修复（试用前置） | `keeper.ts` + `unit.ts` 回归 | ✅ 本轮完成 |
-| 1 | `ScheduleStore` 接口 + memory/SQL 实现（镜像 `KeeperStore`） | `scheduler-store.ts` | ⬜ |
-| 2 | `IsubScheduler` 核心：`schedule()` / `tick()` cursor 推进 / Transition 计算 | `scheduler.ts` | ⬜ |
-| 3 | 四类执行器：downgrade(refund) / upgrade(consent+applyConsent) / payg_reprice(换卡) / trial_end | `scheduler.ts` | ⬜ |
-| 4 | `scheduler-smoke`（离线假链）：四类转换 + consent gate（涨价未签前停在旧价） | `scripts/scheduler-smoke.ts` | ⬜ |
-| 5 | testnet e2e（可选，后置） | `managed-e2e` 扩展 | ⬜ |
+| 0 | keeper `not_before` 修复（试用前置） | `keeper.ts` + `unit.ts` 回归 | ✅ |
+| 1 | `ScheduleStore` 接口 + `memoryScheduleStore` | `scheduler.ts` | ✅ |
+| 2 | `IsubScheduler` 核心：`schedule()` / `tick()` cursor 推进 / Transition 计算 | `scheduler.ts` | ✅ |
+| 3 | 四类执行器：downgrade(refund) / upgrade(consent+applyConsent) / payg_reprice(换卡) / trial | `scheduler.ts` | ✅ |
+| 4 | `scheduler-smoke`（离线假链）：四类转换 + consent gate（涨价未签前停在旧价；neuter→4 红） | `scripts/scheduler-smoke.ts`（23 断言） | ✅ |
+| 1b | `ScheduleStore` 的 **SQL 实现**（持久化，镜像 `sql-store.ts`；memory 非生产用） | `sql-store.ts`/`db.ts` | ⬜ |
+| 5 | testnet e2e（真链跑通 downgrade refund + upgrade consent） | `managed-e2e` 扩展 | ⬜ |
 
-## 6. 开工前要你拍板的设计问题
+## 6. 设计决策（已拍板 2026-06-19）
 
-1. **降级默认**：静默退差额（推荐，真零动作，但毛额烧预算）vs 重签低价（干净但要签一次）？
-2. **升级 consent 谁来呈现**：`onConsentRequired` 回调交给商家弹（推荐）vs SDK 出托管确认页？
-3. **编排器定位**：并列在 keeper/biller 旁、只管 phase 边界（推荐）vs 由编排器统一驱动周期扣费？
-4. **phase 时间**：创建时解析成绝对 ms（推荐，简单）vs 相对事件（"首付后 30 天"，需事件钩子）？
+| 决策 | 选定 | 落在代码哪里 |
+|---|---|---|
+| 1. 降级默认 | **静默退差额**（每期 `charge(price)` 后 `refund(price−effective)`，按 `charge_seq` 幂等；毛额烧预算记为 v1 已知项） | `IsubScheduler.silentRefund` |
+| 2. 升级 consent 呈现 | **`onConsentRequired` 回调**（SDK 抛 `consent.required` 事件，商家自呈现；签字前停旧价） | `advanceCursor` → `applyConsent` |
+| 3. 编排器定位 | **并列**在 keeper/biller 旁，只在 phase 边界动作；周期扣费仍由 keeper/biller | `tick()` 不驱动周期扣费 |
+| 4. phase 时间 | **创建时解析的绝对 ms** | `SchedulePhase.startMs` |
 
-> 我的推荐组合：**1=静默退差额 · 2=回调 · 3=并列 · 4=绝对 ms**。确认后我从 step 1 开写。
+> 备注：升级时旧 mandate 的 `revoke` 是**订阅者**动作（在其 consent PTB 内完成）；编排器签名是**商家**（`refund` 仅 merchant）。`applyConsent` 后 `tick` 发 `mandate.replaced`，商家据此把 keeper 的 watch 从旧 id 切到新 id。
 
 ---
 

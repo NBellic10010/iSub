@@ -13,6 +13,7 @@ export * from './exposure';
 export * from './lag';
 export * from './pricing';
 export * from './consent';
+export * from './scheduler';
 // Role-surface subpaths — import directly, not via the core index:
 //   `@isub/sdk/agent`       — IsubAgent + MCP/LangChain tool descriptors (agent/payer runtime; dep-free)
 //   `@isub/sdk/biller`      — IsubBiller PAYG metering→settle pipeline + memBillerStore (service/payee; dep-free)
