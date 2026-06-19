@@ -7,7 +7,7 @@
 
 | | 选择 | 状态 |
 |---|---|---|
-| **架构 A** —— 纯链下 Schedule 编排器，合约不动 | ✅ **现在做** | **step 0–4 完成**（核心 + 离线回归）；SQL store + testnet e2e 待办 |
+| **架构 A** —— 纯链下 Schedule 编排器，合约不动 | ✅ **现在做** | **step 0–4 + 1b 完成**（核心 + SQL 持久化 + 离线回归）；testnet e2e 待办 |
 | **架构 B** —— 把 phase 价目向量预签进 Mandate，合约改 | 📋 **roadmap** | 等"无用户动作的涨价"成为真需求再上 |
 
 二者不互斥：**A 的编排器（phase 时间表、转换调度、降级退差额、PAYG 换卡）就是 B 的地基**。
@@ -148,8 +148,8 @@ A 默认走静默退差额（拿"零动作"），把毛额预算瑕疵记为 v1 
 | 1 | `ScheduleStore` 接口 + `memoryScheduleStore` | `scheduler.ts` | ✅ |
 | 2 | `IsubScheduler` 核心：`schedule()` / `tick()` cursor 推进 / Transition 计算 | `scheduler.ts` | ✅ |
 | 3 | 四类执行器：downgrade(refund) / upgrade(consent+applyConsent) / payg_reprice(换卡) / trial | `scheduler.ts` | ✅ |
-| 4 | `scheduler-smoke`（离线假链）：四类转换 + consent gate（涨价未签前停在旧价；neuter→4 红） | `scripts/scheduler-smoke.ts`（23 断言） | ✅ |
-| 1b | `ScheduleStore` 的 **SQL 实现**（持久化，镜像 `sql-store.ts`；memory 非生产用） | `sql-store.ts`/`db.ts` | ⬜ |
+| 4 | `scheduler-smoke`（离线假链）：四类转换 + consent gate（涨价未签前停在旧价；neuter→4 红） | `scripts/scheduler-smoke.ts`（31 断言：23 mem + 8 SQL） | ✅ |
+| 1b | `ScheduleStore` 的 **SQL 实现**（`sqlScheduleStore`，多租户/锁/bigint `{$b}` 编码；镜像 `sql-store.ts`） | `db.ts` `schedules` 表 + `sql-store.ts` | ✅ |
 | 5 | testnet e2e（真链跑通 downgrade refund + upgrade consent） | `managed-e2e` 扩展 | ⬜ |
 
 ## 6. 设计决策（已拍板 2026-06-19）

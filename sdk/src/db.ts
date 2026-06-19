@@ -95,6 +95,25 @@ CREATE TABLE IF NOT EXISTS locks (
   heartbeat_ms INTEGER,
   PRIMARY KEY (merchant_id, name)
 );
+
+-- Scheduler (Architecture A) phase plans, per tenant. The phases column is an opaque JSON
+-- value object (bigints encoded as {"$b":"..."}); phase_cursor/status/refunded_through_seq
+-- drive tick(). phase_cursor (not cursor) dodges the Postgres reserved word for the port.
+CREATE TABLE IF NOT EXISTS schedules (
+  merchant_id          TEXT NOT NULL,
+  subscription_id      TEXT NOT NULL,
+  account_id           TEXT NOT NULL,
+  plan_id              TEXT NOT NULL,
+  merchant             TEXT NOT NULL,
+  mandate_id           TEXT NOT NULL,
+  phases               TEXT NOT NULL,
+  phase_cursor         INTEGER NOT NULL,
+  status               TEXT NOT NULL,
+  refunded_through_seq INTEGER,
+  pending_cursor       INTEGER,
+  created_at           INTEGER NOT NULL,
+  PRIMARY KEY (merchant_id, subscription_id)
+);
 `;
 
 /**

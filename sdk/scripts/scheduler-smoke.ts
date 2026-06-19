@@ -188,11 +188,63 @@ async function scenarioTrial(): Promise<void> {
   check(fk.refundTotal() === 0n, 'standard billed at full price (no refund)');
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+async function scenarioSqlPersistence(): Promise<void> {
+  console.log('\n• A (SQL): durable store — schedule survives restart (phases/bigint/cursor), idempotent, tenant-isolated, locked');
+  events.length = 0;
+  const { openDb } = await import('../src/db'); // node:sqlite — needs --experimental-sqlite
+  const { sqlScheduleStore } = await import('../src/sql-store');
+  const db = openDb(':memory:');
+
+  const fk = fakeChain([mk({ id: '0xS', price: 100n })]);
+  const phases: SchedulePhase[] = [
+    { startMs: 0, kind: 'fixed', price: 100n, intervalMs: 1000n, label: 'standard' },
+    { startMs: 1000, kind: 'fixed', price: 60n, label: 'loyalty' },
+    { startMs: 2000, kind: 'payg', rateCard: { version: 3, meters: { gb: { key: 'gb', priceNum: 5n, priceDen: 2n, units: 1n, includedQty: 10n } } }, label: 'metered' },
+  ];
+
+  // Instance 1: schedule, advance into the downgrade phase, take one refund, then shut down.
+  const s1 = new IsubScheduler(fk.chain, MERCHANT, { store: sqlScheduleStore(db, 'M1'), onEvent: (e) => events.push(e) });
+  await s1.schedule({ subscriptionId: 'subS', accountId: '0xACCT', planId: '0xPLAN', merchant: '0xMERCHANT', mandateId: '0xS', phases, nowMs: 0 });
+  await s1.tick(1000);            // advance to loyalty (downgrade), baseline the seq
+  fk.keeperCharge('0xS');         // one charge at the high price
+  await s1.tick(1500);            // refund the 40 delta
+  await s1.close();
+  check(fk.refundTotal() === 40n, 'SQL: instance 1 refunded 40 on the downgrade phase');
+
+  // Instance 2: a fresh scheduler over the SAME db — must reload the schedule exactly.
+  const s2 = new IsubScheduler(fk.chain, MERCHANT, { store: sqlScheduleStore(db, 'M1') });
+  await s2.init();
+  const r = s2.snapshot()[0];
+  check(!!r && r.subscriptionId === 'subS' && r.cursor === 1 && r.status === 'active', 'SQL: cursor/status reloaded after restart');
+  check(!!r && r.refundedThroughSeq === 1, 'SQL: refund idempotency anchor survived restart');
+  check(!!r && r.phases[0]!.price === 100n && r.phases[0]!.intervalMs === 1000n, 'SQL: fixed-phase bigints (price/intervalMs) round-tripped');
+  const p3 = r!.phases[2]!;
+  check(p3.kind === 'payg' && p3.rateCard?.meters.gb?.priceNum === 5n && p3.rateCard?.meters.gb?.includedQty === 10n, 'SQL: nested rateCard bigints round-tripped ({$b})');
+
+  // Idempotency across the restart: a re-tick with no new charge must NOT double-refund.
+  await s2.tick(1600);
+  check(fk.refundTotal() === 40n, 'SQL: no double-refund after restart (anchor honored)');
+  await s2.close();
+
+  // Tenant isolation: a different merchant sees nothing.
+  check((await sqlScheduleStore(db, 'M2').load()).length === 0, 'SQL: tenant isolation — M2 sees no schedules');
+
+  // Single-instance lock: a second M1 scheduler is locked out while the first holds it.
+  const held = sqlScheduleStore(db, 'M1');
+  await held.acquireLock!();
+  let lockedOut = false;
+  try { await sqlScheduleStore(db, 'M1').acquireLock!(); } catch { lockedOut = true; }
+  check(lockedOut, 'SQL: single-instance lock — second M1 scheduler is locked out');
+  await held.releaseLock!();
+}
+
 async function main(): Promise<void> {
   await scenarioDowngrade();
   await scenarioUpgradeConsentGate();
   await scenarioPaygReprice();
   await scenarioTrial();
+  await scenarioSqlPersistence();
   console.log(`\n${failed === 0 ? '✅' : '❌'} scheduler smoke: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }

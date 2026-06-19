@@ -133,8 +133,9 @@
 - **step 0–4 已完成**（`scheduler` 分支）：
   - step 0：keeper `not_before` 修复（`keeper.ts`：`earliest = max(last+interval, not_before)`）。修前试用期每 tick 发一笔注定 `EIntervalNotElapsed` 的 charge（烧 gas+刷 journal）。回归 `unit.ts › keeper not_before`（neuter→3 红）。`self-audit` 对应追踪项已标 Resolved。
   - step 1–3：`sdk/src/scheduler.ts` —— `SchedulePhase`/`Schedule` 模型、`memoryScheduleStore`、`IsubScheduler`（`schedule`/`tick`/`applyConsent`/`cancel`）。四类执行器全实现。signer=**商家**（refund 仅 merchant）；revoke 旧 mandate 是订阅者动作（其 consent PTB 内）。已并入 core index。
-  - step 4：`scripts/scheduler-smoke.ts` —— 离线假链 **23 断言**：静默降级（基线/幂等/批量退差额）、升级 consent gate（停旧价→`applyConsent`→换 mandate）、PAYG reprice 事件、试用→付费。**consent gate neuter→4 红**（证明咬得住；注：链上 price 仍 UNCHANGED——合约才是 over-pull 真边界，gate 管的是状态建模+催签）。
-- **仍待办**：step 1b `ScheduleStore` 的 **SQL 实现**（memory 非生产用）、step 5 testnet e2e（真链跑 downgrade refund + upgrade consent）。
+  - step 4：`scripts/scheduler-smoke.ts` —— 离线假链回归：静默降级（基线/幂等/批量退差额）、升级 consent gate（停旧价→`applyConsent`→换 mandate）、PAYG reprice 事件、试用→付费。**consent gate neuter→4 红**（证明咬得住；注：链上 price 仍 UNCHANGED——合约才是 over-pull 真边界，gate 管的是状态建模+催签）。
+  - step 1b：`sqlScheduleStore`（`sql-store.ts` + `db.ts` 新 `schedules` 表）—— 多租户（`merchant_id` 行隔离）、单实例锁（复用 `makeLock`）、phases 的 bigint 用 `{"$b":"…"}` 编码显式 round-trip（含嵌套 rateCard meter）。smoke 加 8 条 SQL 断言（重启 reload cursor/status/退款锚、bigint 往返、租户隔离、锁）。**scheduler-smoke 共 31 断言（23 mem + 8 SQL）全绿**。
+- **仍待办**：step 5 testnet e2e（真链跑 downgrade refund + upgrade consent）。
 
 ### 下一轮（Phase 2.2+，打通之后）
 

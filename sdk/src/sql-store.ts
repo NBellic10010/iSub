@@ -9,6 +9,7 @@ import { hostname } from 'node:os';
 import type { Db } from './db';
 import type { JournalEntry, KeeperStore, MandateLifecycle, MandateTrack, PersistedKeeperState } from './store';
 import type { BillerStore, UsageRow } from './biller';
+import type { Schedule, ScheduleStore, SchedulePhase } from './scheduler';
 import { IsubError } from './errors';
 
 const LOCK_STALE_MS = 120_000;
@@ -272,5 +273,71 @@ export function sqlBillerStore(db: Db, merchantId: string): BillerStore {
     },
 
     ...makeLock(db, merchantId, 'biller'),
+  };
+}
+
+interface ScheduleDbRow {
+  subscription_id: string;
+  account_id: string;
+  plan_id: string;
+  merchant: string;
+  mandate_id: string;
+  phases: string;
+  phase_cursor: number;
+  status: string;
+  refunded_through_seq: number | null;
+  pending_cursor: number | null;
+}
+
+// Phases carry bigints (price, intervalMs, and the nested rateCard meter numerics). JSON has
+// no bigint, so encode each as {"$b":"…"} and restore on read. Explicit round-trip — the F-07
+// lesson: a field the store doesn't handle is silently lost. No SchedulePhase/RateCard field
+// is itself an object with a string `$b`, so the reviver can't misfire on real data.
+const phasesToJson = (phases: SchedulePhase[]): string =>
+  JSON.stringify(phases, (_k, v) => (typeof v === 'bigint' ? { $b: v.toString() } : v));
+const phasesFromJson = (text: string): SchedulePhase[] =>
+  JSON.parse(text, (_k, v) =>
+    v && typeof v === 'object' && typeof (v as { $b?: unknown }).$b === 'string' ? BigInt((v as { $b: string }).$b) : v,
+  ) as SchedulePhase[];
+
+/** A `ScheduleStore` (scheduler.ts) scoped to one tenant. Drop-in for `memoryScheduleStore`. */
+export function sqlScheduleStore(db: Db, merchantId: string, lockName = 'scheduler'): ScheduleStore {
+  return {
+    async load(): Promise<Schedule[]> {
+      const rows = db
+        .prepare(
+          `SELECT subscription_id, account_id, plan_id, merchant, mandate_id, phases, phase_cursor, status, refunded_through_seq, pending_cursor
+           FROM schedules WHERE merchant_id = ? ORDER BY subscription_id`,
+        )
+        .all(merchantId) as unknown as ScheduleDbRow[];
+      return rows.map((r) => ({
+        subscriptionId: r.subscription_id,
+        accountId: r.account_id,
+        planId: r.plan_id,
+        merchant: r.merchant,
+        mandateId: r.mandate_id,
+        phases: phasesFromJson(r.phases),
+        cursor: r.phase_cursor,
+        status: r.status as Schedule['status'],
+        refundedThroughSeq: r.refunded_through_seq ?? undefined,
+        pendingCursor: r.pending_cursor ?? undefined,
+      }));
+    },
+
+    async upsert(s: Schedule): Promise<void> {
+      db.prepare(
+        `INSERT INTO schedules (merchant_id, subscription_id, account_id, plan_id, merchant, mandate_id, phases, phase_cursor, status, refunded_through_seq, pending_cursor, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(merchant_id, subscription_id) DO UPDATE SET
+           account_id=excluded.account_id, plan_id=excluded.plan_id, merchant=excluded.merchant,
+           mandate_id=excluded.mandate_id, phases=excluded.phases, phase_cursor=excluded.phase_cursor,
+           status=excluded.status, refunded_through_seq=excluded.refunded_through_seq, pending_cursor=excluded.pending_cursor`,
+      ).run(
+        merchantId, s.subscriptionId, s.accountId, s.planId, s.merchant, s.mandateId,
+        phasesToJson(s.phases), s.cursor, s.status, s.refundedThroughSeq ?? null, s.pendingCursor ?? null, Date.now(),
+      );
+    },
+
+    ...makeLock(db, merchantId, lockName),
   };
 }
