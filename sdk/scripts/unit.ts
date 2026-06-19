@@ -131,6 +131,32 @@ async function testKeeperLock(): Promise<void> {
   rmSync(dir, { recursive: true, force: true });
 }
 
+async function testKeeperNotBefore(): Promise<void> {
+  console.log('\n• keeper not_before (trial window must not submit a doomed charge every tick)');
+  // Trial: the interval watermark (last_charged + interval) is already in the past, but
+  // not_before is in the future. On-chain the contract aborts EIntervalNotElapsed; the
+  // keeper must skip OFF-CHAIN so it never submits the tx (no gas burn / journal spam).
+  const trial: MandateState = { ...DUE_FIXED, id: '0xTRIAL', lastChargedMs: 0n, intervalMs: 1000n, notBeforeMs: 5_000_000n };
+  let chargeCalls = 0;
+  const stub = {
+    getMandatesResolved: async (ids: string[]) => ids.map((id) => ({ id, mandate: trial })),
+    getAccount: async () => ({ id: trial.accountId, owner: '0xu', balance: 500n }),
+    charge: async () => { chargeCalls++; return { digest: '0xdig' }; },
+  } as unknown as IsubClient;
+  const keeper = new IsubKeeper(stub, DUMMY_SIGNER, [trial.id], { store: memoryStore(), dueMarginMs: 0 });
+
+  // Before not_before: "due" by the interval watermark, but blocked by not_before → skip, no tx.
+  const r1 = await keeper.tick(1_000_000); // 1_000_000 < not_before 5_000_000
+  check(chargeCalls === 0, `no charge submitted during the trial window (got ${chargeCalls})`);
+  check(r1.charged.length === 0 && r1.skipped.some((s) => s.mandateId === trial.id && /not due yet/.test(s.reason)),
+    'trial mandate skipped "not due yet" (honors not_before, no doomed tx)');
+
+  // At not_before: now genuinely chargeable.
+  const r2 = await keeper.tick(5_000_000); // 5_000_000 >= not_before
+  check(chargeCalls === 1 && r2.charged.some((c) => c.mandateId === trial.id),
+    'first charge fires exactly when not_before elapses');
+}
+
 // ===== decoupling: the core barrel must stay Node-dependency-free (isomorphic) =====
 // Browser / agent consumers import the core (`@isub/sdk`); only the declared Node
 // shells — the server-only SUBPATH modules (@isub/sdk/store-file, /webhook, /db,
@@ -392,6 +418,7 @@ async function main(): Promise<void> {
   await testStore();
   await testKeeperIsolation();
   await testKeeperLock();
+  await testKeeperNotBefore();
   await testAgent();
   await testLag();
   testPricing();

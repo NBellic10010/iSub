@@ -234,7 +234,15 @@ export class IsubKeeper {
         result.skipped.push({ mandateId: m.id, reason: 'PAYG (merchant-driven amount)' });
         continue;
       }
-      if (now < m.lastChargedMs + m.intervalMs + BigInt(this.dueMarginMs)) {
+      // Earliest chargeable = max(interval watermark, not_before). The contract gates the
+      // first charge on `not_before_ms` (trial / first_charge_after delay) via line ~354,
+      // but the interval watermark alone reads as "due" from signup onward: authorize sets
+      // last_charged_ms = now - interval_ms, so lastChargedMs + intervalMs == signup. Without
+      // honoring not_before here, the keeper submits a doomed charge EVERY tick across the
+      // whole trial, each aborting EIntervalNotElapsed on-chain — burned gas + journal spam.
+      const dueAtMs = m.lastChargedMs + m.intervalMs;
+      const earliestMs = dueAtMs > m.notBeforeMs ? dueAtMs : m.notBeforeMs;
+      if (now < earliestMs + BigInt(this.dueMarginMs)) {
         result.skipped.push({ mandateId: m.id, reason: 'not due yet' });
         continue;
       }

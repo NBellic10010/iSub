@@ -122,7 +122,16 @@
 
 - **F-07 双扣（High，已修）**：`recoverOrphan` 原先靠"对当前未计费集前缀求和到 orphan 金额"重建已落账批次，但 `submit` 日志只存 `amount`+`seq`、**没存成员**。丢 ack 后若有记录乱序/新增跨批边界 → 标错记录已计费 → 真正落账的记录留作"未计费"被**再扣一次**（链上双扣）；或前缀凑不齐金额则 bail + 重扣整批（净 2×）。**修法**：`submit` 记录确切 `usageIds`（`JournalEntry.usageIds` + SQL `charges.usage_ids` 列/迁移），`recoverOrphan` 按成员精确标记、一次处理**所有** orphan、legacy 无成员转人工。改了 `store.ts`/`biller.ts`/`db.ts`/`sql-store.ts`。`biller-smoke` 加 scenario I（乱序不双扣，spent==9 非 14）→ **31→35 断言绿**，且验证过"去掉 usageIds 即在 scenario F 翻红"。⚠️ 注：Phase 2.0 两轮 ~50-agent 审计修过 3 个 double-spend，**漏了这条 reorder 路径** —— 不同审计角度抓不同 bug。
 - **追踪项**（链下 liveness/ops，无用户资金损失，见 `self-audit.md` Round 5）：FIXED 节奏漂移（产品决策）、keeper 忽略 `not_before`（试用烧 gas，**依赖长试用前先修**）、PAYG 无独立对账/dunning、service serviceable 单向锁死、默认非持久 store、输入 u64 溢出。
-- **scheduler**（分阶段定价 / 预约升降级）可行性已评估：链下编排能做 ~80%，但**涨价必须订阅者签字**（非托管铁律）—— **方案待用户讨论后再做**。
+- **scheduler**（分阶段定价 / 预约升降级）可行性已评估：链下编排能做 ~80%，但**涨价必须订阅者签字**（非托管铁律）。**已定方案 → 见下「Scheduler」块**。
+
+### Scheduler：架构 A 落地 / B roadmap 🚧（2026-06-19，`scheduler` 分支）
+
+决策：**A（纯链下编排器，合约不动）现在做；B（链上 phase 向量预签，要改合约+重审）作 roadmap**。二者不互斥——A 的编排器就是 B 的地基。完整规格见 **`product-plan/scheduler-design.md`**。
+
+- **铁律**：签名是天花板，商家只能拉更少、永不更多，除非新签名。→ 四类转换：试用/降级/PAYG改价**免签**；**涨价=consent 事件必须新签**（A 唯一做不到"静默涨价"，那要上 B）。
+- **step 0 已完成**：keeper `not_before` 修复（`keeper.ts`：`earliest = max(last+interval, not_before)`）。修前试用期每 tick 发一笔注定 `EIntervalNotElapsed` 的 charge（烧 gas+刷 journal）。回归 `unit.ts › keeper not_before`（neuter→3 红，restore→绿，**83 unit 全绿**）。`self-audit.md` 对应追踪项已标 Resolved。
+- **待拍板**（写 step 1 前）：降级默认（静默退差额 vs 重签低价）/ 升级 consent 呈现方式 / 编排器定位（并列 vs 驱动）/ phase 时间（绝对 ms vs 相对事件）。推荐组合写在 design 文档 §6。
+- **施工顺序**：step1 `ScheduleStore` → step2 `IsubScheduler` 核心 → step3 四类执行器 → step4 `scheduler-smoke` → step5 testnet e2e。
 
 ### 下一轮（Phase 2.2+，打通之后）
 
