@@ -18,6 +18,7 @@
 - [`product-plan/concept.md`](product-plan/concept.md) — 概念、痛点、Sui 原生差异化、核实结论、原则契合、赛道/sponsor
 - [`product-plan/architecture.md`](product-plan/architecture.md) — Move 合约对象模型、charge/撤销、keeper、sponsored tx、SDK 分层
 - [`product-plan/scope-and-timeline.md`](product-plan/scope-and-timeline.md) — 分层 scope（Tier 0–3）、日历计划、风险、现实目标
+- [`product-plan/privacy.md`](product-plan/privacy.md) — 隐私模型：不可关联 vs 匿名、burner/zkLogin/隐形地址、刻意不做混币
 - [`sdk/README.md`](sdk/README.md) — TS SDK（gRPC）+ e2e/keeper/payg/dunning 脚本（localnet + testnet 全绿）
 - [`product-plan/phase2-demo-app.md`](product-plan/phase2-demo-app.md) — 商家 demo app 规划（Phase 2）
 

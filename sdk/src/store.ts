@@ -43,6 +43,12 @@ export interface JournalEntry {
   reason?: string;
   /** state: the lifecycle state entered. */
   state?: MandateLifecycle;
+  /**
+   * submit (biller): the EXACT usageIds in this batch. Orphan recovery marks precisely
+   * these billed — never an amount-matched prefix of the live unbilled set, which a
+   * reordered/added record could make sum to the same total and mis-bill (double-charge).
+   */
+  usageIds?: string[];
 }
 
 /**

@@ -6,10 +6,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileStore } from '../src/store-file';
 import { memoryStore } from '../src/store';
-import { IsubKeeper, ChargeMode, MandateStatus, scheduleLag, priceUsage, priceUsageMulti, assertValidRateCard, assertRateCardFits } from '../src/index';
-import type { IsubClient, IsubSigner, MandateState, RateCard } from '../src/index';
+import { IsubKeeper, ChargeMode, MandateStatus, scheduleLag, priceUsage, priceUsageMulti, assertValidRateCard, assertRateCardFits, buildConsent, verifyConsentSignature } from '../src/index';
+import type { IsubClient, IsubSigner, MandateState, RateCard, AuthorizeFixedArgs, AuthorizeMeteredArgs } from '../src/index';
 import { IsubAgent, type SpendPolicy } from '../src/agent';
 import { IsubBiller, memBillerStore, type BillerChain } from '../src/biller';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 
 let passed = 0;
 let failed = 0;
@@ -355,6 +356,37 @@ async function testPricedIngest(): Promise<void> {
   }
 }
 
+// ===== consent (L1b trusted-display: canonical terms + verifiable signed intent) =====
+const FIXED_PLAN = { id: '0xPLAN', merchant: '0xMERCH', mode: ChargeMode.Fixed, price: 50_000_000n, intervalMs: 2_592_000_000n, rateCap: 0n, rateWindowMs: 0n, keeper: '0x0', active: true };
+const PAYG_PLAN = { id: '0xPP', merchant: '0xMERCH', mode: ChargeMode.Payg, price: 0n, intervalMs: 0n, rateCap: 100_000_000n, rateWindowMs: 60_000n, keeper: '0xKEEP', active: true };
+async function testConsent(): Promise<void> {
+  console.log('\n• consent (L1b: terms+expected_* from the SAME plan read, verifiable signed intent)');
+  const choice = { accountId: '0xACCT', totalBudget: 500_000_000n, expiryMs: 2_000_000_000_000n };
+  const cF = buildConsent(FIXED_PLAN, choice);
+  const aF = cF.authorize as AuthorizeFixedArgs;
+  check(aF.expectedPrice === 50_000_000n && aF.expectedMerchant === '0xMERCH' && aF.expectedIntervalMs === 2_592_000_000n, 'Fixed: expected_* snapshot taken from the plan');
+  check(cF.terms.some((t) => t.includes('0xMERCH')), 'Fixed: human terms name the merchant (payee)');
+  check(cF.intentMessage === buildConsent(FIXED_PLAN, choice).intentMessage, 'intent message is deterministic');
+  check(cF.intentMessage.includes('mode=fixed') && cF.intentMessage.includes('price=50000000'), 'intent message encodes exact terms (integer-exact)');
+
+  const cP = buildConsent(PAYG_PLAN, choice);
+  const aP = cP.authorize as AuthorizeMeteredArgs;
+  check(aP.maxPerCharge === 100_000_000n && aP.expectedKeeper === '0xKEEP', 'PAYG: maxPerCharge defaults to rate_cap; keeper bound');
+  check(cP.intentMessage.includes('mode=payg') && cP.intentMessage.includes('keeper=0xKEEP'), 'PAYG intent encodes the authorized keeper');
+
+  rejectsSync(() => buildConsent(FIXED_PLAN, { ...choice, totalBudget: 0n }), 'zero budget rejected');
+  rejectsSync(() => buildConsent({ ...FIXED_PLAN, active: false }, choice), 'inactive plan rejected');
+  check(buildConsent(FIXED_PLAN, choice).intentMessage !== buildConsent(FIXED_PLAN, { ...choice, totalBudget: 1n }).intentMessage, 'changed terms → different signed message (tamper-evident)');
+
+  // verify round-trip: a wallet signs the intent; anyone can later prove it.
+  const kp = Ed25519Keypair.generate();
+  const msg = cF.intentMessage;
+  const { signature } = await kp.signPersonalMessage(new TextEncoder().encode(msg));
+  check((await verifyConsentSignature(msg, signature, kp.toSuiAddress())) === true, 'valid consent signature verifies to the signer');
+  check((await verifyConsentSignature(msg + ' tampered', signature, kp.toSuiAddress())) === false, 'tampered message fails verification');
+  check((await verifyConsentSignature(msg, signature, '0xdeadbeef')) === false, 'wrong claimed address fails verification');
+}
+
 async function main(): Promise<void> {
   testCoreIsomorphism();
   await testStore();
@@ -365,6 +397,7 @@ async function main(): Promise<void> {
   testPricing();
   testPricingFits();
   await testPricedIngest();
+  await testConsent();
   console.log(`\n${failed === 0 ? '✅' : '❌'} backend unit: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }

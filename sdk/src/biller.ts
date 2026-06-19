@@ -252,7 +252,9 @@ export class IsubBiller {
       }
 
       const seq = m.chargeSeq;
-      await this.store.appendJournal({ at: nowMs, mandateId, kind: 'submit', amount: sum.toString(), seq: Number(seq) });
+      // Record the EXACT batch membership so recoverOrphan marks the right records billed
+      // (not an amount-matched prefix of the then-current unbilled set).
+      await this.store.appendJournal({ at: nowMs, mandateId, kind: 'submit', amount: sum.toString(), seq: Number(seq), usageIds: batch.map((r) => r.usageId) });
       try {
         const { digest } = await this.chain.chargeMetered(this.signer, { accountId: m.accountId, mandateId, amount: sum, seq });
         // Charge landed. Commit OUTSIDE the abort-handling try: a markBilled/journal failure
@@ -289,39 +291,40 @@ export class IsubBiller {
   }
 
   /**
-   * If a prior `submit` at seq S has no matching `charged` and the on-chain charge_seq has
-   * advanced past S, that charge LANDED (single-charger invariant) but wasn't recorded.
-   * Mark the oldest unbilled prefix summing to the submit amount as billed + back-fill a
-   * `charged` entry. Returns the recovered amount (0 if nothing to recover).
+   * Reconcile landed-but-unrecorded charges. A prior `submit` at seq S whose `charged` is
+   * missing AND whose seq < the on-chain charge_seq LANDED (single-charger invariant) but
+   * wasn't recorded. Mark EXACTLY that submit's recorded `usageIds` billed + back-fill a
+   * `charged` entry — membership is authoritative, never reconstructed by amount. (The old
+   * amount-matched-prefix reconstruction could mark the WRONG records billed when a later /
+   * reordered record made a different prefix sum to the same total — leaving the truly-billed
+   * records "unbilled" and re-charged on the next flush, i.e. a double-charge.) Processes ALL
+   * outstanding orphans oldest-first; returns the total recovered (0 if none).
    */
   private async recoverOrphan(mandateId: string, nowMs: number): Promise<bigint> {
     const mine = (await this.store.readJournal()).filter((e) => e.mandateId === mandateId && e.seq != null);
     const settledSubmitSeqs = new Set(mine.filter((e) => e.kind === 'charged').map((e) => e.seq! - 1));
-    const orphan = [...mine].reverse().find((e) => e.kind === 'submit' && !settledSubmitSeqs.has(e.seq!));
-    if (!orphan || orphan.amount == null) return 0n;
+    const orphans = mine
+      .filter((e) => e.kind === 'submit' && !settledSubmitSeqs.has(e.seq!))
+      .sort((a, b) => a.seq! - b.seq!);
+    if (orphans.length === 0) return 0n;
 
-    const m = await this.chain.getMandate(mandateId);
-    if (Number(m.chargeSeq) <= orphan.seq!) return 0n; // submit did NOT land — normal flow re-charges it
-
-    const target = BigInt(orphan.amount);
-    const unbilled = await this.store.unbilled(mandateId);
-    const batch: UsageRow[] = [];
-    let sum = 0n;
-    for (const r of unbilled) {
-      if (sum >= target) break;
-      batch.push(r);
-      sum += r.amount;
+    const chainSeq = Number((await this.chain.getMandate(mandateId)).chargeSeq);
+    let recovered = 0n;
+    for (const orphan of orphans) {
+      if (chainSeq <= orphan.seq!) continue; // this submit did NOT land — normal flow re-charges it
+      if (!orphan.usageIds || orphan.amount == null) {
+        // Legacy submit predating membership recording: cannot safely map the landed charge to
+        // records (amount-matching is the very bug this removed). Surface for manual reconcile.
+        await this.store.appendJournal({ at: nowMs, mandateId, kind: 'fail', reason: `recover: landed submit seq=${orphan.seq} has no recorded usageIds — manual reconcile` });
+        continue;
+      }
+      await this.store.markBilled(orphan.usageIds); // exactly the records this charge covered
+      const amt = BigInt(orphan.amount);
+      await this.store.appendJournal({ at: nowMs, mandateId, kind: 'charged', amount: orphan.amount, seq: orphan.seq! + 1, reason: 'recovered' });
+      this.emit({ type: 'charge.succeeded', mandateId, at: nowMs, amount: amt, digest: 'recovered', seq: orphan.seq! + 1 });
+      recovered += amt;
     }
-    if (sum !== target) {
-      // Can't map the landed charge back to whole records — surface for manual reconcile,
-      // don't guess (guessing could under/over-bill).
-      await this.store.appendJournal({ at: nowMs, mandateId, kind: 'fail', reason: `recover: landed ${target} but unbilled prefix=${sum} — manual reconcile` });
-      return 0n;
-    }
-    await this.store.markBilled(batch.map((r) => r.usageId));
-    await this.store.appendJournal({ at: nowMs, mandateId, kind: 'charged', amount: target.toString(), seq: orphan.seq! + 1, reason: 'recovered' });
-    this.emit({ type: 'charge.succeeded', mandateId, at: nowMs, amount: target, digest: 'recovered', seq: orphan.seq! + 1 });
-    return target;
+    return recovered;
   }
 
   private async commitCharge(mandateId: string, batch: UsageRow[], sum: bigint, newSeq: number, digest: string | undefined, nowMs: number, m: MandateState): Promise<void> {

@@ -1,3 +1,4 @@
+'use client';
 import { useMemo } from 'react';
 import { useCurrentAccount, useCurrentNetwork, useDAppKit } from '@mysten/dapp-kit-react';
 import { SuiGrpcClient } from '@mysten/sui/grpc';
@@ -16,17 +17,11 @@ export interface IsubHandle {
 }
 
 /**
- * Bridge dApp-kit's connected wallet into the iSub SDK — this is the whole "login".
- *
- * Design note: we build our OWN `SuiGrpcClient` rather than using `useCurrentClient()`.
- * The SDK calls top-level gRPC methods (`executeTransaction` / `getObject` /
- * `waitForTransaction`), which is exactly what `new SuiGrpcClient({ network, baseUrl })`
- * exposes — byte-for-byte the same client the contracts were tested against on Node.
- * It's memoized on `network`, so wallet network-switching still swaps the client.
- *
- * The wallet is used ONLY to sign (`dAppKit.signTransaction`); our client executes the
- * signed bytes. So created-id parsing, abort decoding, and the read-after-write barrier
- * are identical to the keeper/smoke path — the browser path adds no new trust surface.
+ * Bridge dApp-kit's connected wallet into the iSub SDK — the whole "login". Ported verbatim
+ * from the proven demo bridge: we build our OWN SuiGrpcClient (the SDK calls top-level gRPC
+ * methods, identical to the Node path the contracts were tested against) and use the wallet
+ * ONLY to sign; execution + id/abort parsing stay byte-for-byte the same as the keeper.
+ * Memoized on `network`, so wallet network-switching swaps the client.
  */
 export function useIsub(): IsubHandle {
   const account = useCurrentAccount();
@@ -49,7 +44,6 @@ export function useIsub(): IsubHandle {
       {
         address: account.address,
         signTransaction: ({ transaction }) => {
-          // Set the sender ourselves so it's correct regardless of wallet defaults.
           transaction.setSenderIfNotSet(account.address);
           return dAppKit.signTransaction({ transaction });
         },

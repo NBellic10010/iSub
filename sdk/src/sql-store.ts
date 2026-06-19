@@ -71,6 +71,7 @@ interface ChargeRow {
   digest: string | null;
   reason: string | null;
   state: string | null;
+  usage_ids: string | null;
   at_ms: number;
 }
 interface LockRow {
@@ -163,14 +164,14 @@ export function sqlStore(db: Db, merchantId: string, lockName = 'keeper'): Keepe
 
     async appendJournal(e: JournalEntry): Promise<void> {
       db.prepare(
-        `INSERT INTO charges (merchant_id, mandate_id, kind, amount, seq, digest, reason, state, at_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(merchantId, e.mandateId, e.kind, e.amount ?? null, e.seq ?? null, e.digest ?? null, e.reason ?? null, e.state ?? null, e.at);
+        `INSERT INTO charges (merchant_id, mandate_id, kind, amount, seq, digest, reason, state, usage_ids, at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(merchantId, e.mandateId, e.kind, e.amount ?? null, e.seq ?? null, e.digest ?? null, e.reason ?? null, e.state ?? null, e.usageIds ? JSON.stringify(e.usageIds) : null, e.at);
     },
 
     async readJournal(): Promise<JournalEntry[]> {
       const rows = db
-        .prepare(`SELECT mandate_id, kind, amount, seq, digest, reason, state, at_ms FROM charges WHERE merchant_id = ? ORDER BY id`)
+        .prepare(`SELECT mandate_id, kind, amount, seq, digest, reason, state, usage_ids, at_ms FROM charges WHERE merchant_id = ? ORDER BY id`)
         .all(merchantId) as unknown as ChargeRow[];
       return rows.map((r) => ({
         at: r.at_ms,
@@ -181,6 +182,7 @@ export function sqlStore(db: Db, merchantId: string, lockName = 'keeper'): Keepe
         digest: r.digest ?? undefined,
         reason: r.reason ?? undefined,
         state: (r.state as MandateLifecycle | null) ?? undefined,
+        usageIds: r.usage_ids ? (JSON.parse(r.usage_ids) as string[]) : undefined,
       }));
     },
 
@@ -247,14 +249,14 @@ export function sqlBillerStore(db: Db, merchantId: string): BillerStore {
 
     async appendJournal(e: JournalEntry): Promise<void> {
       db.prepare(
-        `INSERT INTO charges (merchant_id, mandate_id, kind, amount, seq, digest, reason, state, at_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(merchantId, e.mandateId, e.kind, e.amount ?? null, e.seq ?? null, e.digest ?? null, e.reason ?? null, e.state ?? null, e.at);
+        `INSERT INTO charges (merchant_id, mandate_id, kind, amount, seq, digest, reason, state, usage_ids, at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(merchantId, e.mandateId, e.kind, e.amount ?? null, e.seq ?? null, e.digest ?? null, e.reason ?? null, e.state ?? null, e.usageIds ? JSON.stringify(e.usageIds) : null, e.at);
     },
 
     async readJournal(): Promise<JournalEntry[]> {
       const rows = db
-        .prepare(`SELECT mandate_id, kind, amount, seq, digest, reason, state, at_ms FROM charges WHERE merchant_id = ? ORDER BY id`)
+        .prepare(`SELECT mandate_id, kind, amount, seq, digest, reason, state, usage_ids, at_ms FROM charges WHERE merchant_id = ? ORDER BY id`)
         .all(merchantId) as unknown as ChargeRow[];
       return rows.map((r) => ({
         at: r.at_ms,
@@ -265,6 +267,7 @@ export function sqlBillerStore(db: Db, merchantId: string): BillerStore {
         digest: r.digest ?? undefined,
         reason: r.reason ?? undefined,
         state: (r.state as MandateLifecycle | null) ?? undefined,
+        usageIds: r.usage_ids ? (JSON.parse(r.usage_ids) as string[]) : undefined,
       }));
     },
 

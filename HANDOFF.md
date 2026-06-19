@@ -116,6 +116,14 @@
 - `service-smoke` 12 断言(凭证/gate/阈值/撤销停服,headless)。
 - **顺带修一个真 bug**：被撤销的 mandate 原先被 biller 误判为 `rate_limited`（暗示"稍后重试"）→ 改为显式 `not_billable`（服务据此停服）。biller-smoke 31 仍绿、无回归。
 
+### Round 5：PAYG/Fixed 跨层审计 + F-07 双扣修复 ✅（2026-06-19，纯 SDK/链下，无合约改动）
+
+对"合约 + 计费管线（keeper/biller/reconcile）"做对抗性跨层审计（8-agent 工作流，16 确认；大多合约残留被**重定级为有界设计取舍**，非 bug）。**真缺陷只有一条、且在链下 biller**：
+
+- **F-07 双扣（High，已修）**：`recoverOrphan` 原先靠"对当前未计费集前缀求和到 orphan 金额"重建已落账批次，但 `submit` 日志只存 `amount`+`seq`、**没存成员**。丢 ack 后若有记录乱序/新增跨批边界 → 标错记录已计费 → 真正落账的记录留作"未计费"被**再扣一次**（链上双扣）；或前缀凑不齐金额则 bail + 重扣整批（净 2×）。**修法**：`submit` 记录确切 `usageIds`（`JournalEntry.usageIds` + SQL `charges.usage_ids` 列/迁移），`recoverOrphan` 按成员精确标记、一次处理**所有** orphan、legacy 无成员转人工。改了 `store.ts`/`biller.ts`/`db.ts`/`sql-store.ts`。`biller-smoke` 加 scenario I（乱序不双扣，spent==9 非 14）→ **31→35 断言绿**，且验证过"去掉 usageIds 即在 scenario F 翻红"。⚠️ 注：Phase 2.0 两轮 ~50-agent 审计修过 3 个 double-spend，**漏了这条 reorder 路径** —— 不同审计角度抓不同 bug。
+- **追踪项**（链下 liveness/ops，无用户资金损失，见 `self-audit.md` Round 5）：FIXED 节奏漂移（产品决策）、keeper 忽略 `not_before`（试用烧 gas，**依赖长试用前先修**）、PAYG 无独立对账/dunning、service serviceable 单向锁死、默认非持久 store、输入 u64 溢出。
+- **scheduler**（分阶段定价 / 预约升降级）可行性已评估：链下编排能做 ~80%，但**涨价必须订阅者签字**（非托管铁律）—— **方案待用户讨论后再做**。
+
 ### 下一轮（Phase 2.2+，打通之后）
 
 - **软风控**（P0，纯链下）：花费熔断（用量飙升→暂停+告警）、step-up 审批（大额要人/二签）、跨-mandate 全局限速、一键 panic revoke-all。见对话"agent PAYG 风控"。
@@ -138,7 +146,7 @@ iSub/
 ├── sdk/                          TS SDK + 脚本（gRPC；localnet + testnet）
 │   ├── README.md                 跑通指南（localnet / testnet / publish / smoke / keeper）
 │   ├── src/                      IsubClient · tx · signer/wallet-signer · keeper · biller · service · agent · mcp · store/store-file · db/sql-store · webhook · reconcile · exposure · errors · constants · types
-│   ├── scripts/                  publish · smoke(19) · keeper-smoke(7) · payg-smoke(16) · dunning-smoke(12) · agent-smoke · store-smoke(24) · biller-smoke(31) · webhook-smoke(13) · service-smoke(12) · wiring-e2e(15,testnet) · keeper · reconcile · fund · grpc-probe
+│   ├── scripts/                  publish · smoke(19) · keeper-smoke(7) · payg-smoke(16) · dunning-smoke(12) · agent-smoke · store-smoke(24) · biller-smoke(35) · webhook-smoke(13) · service-smoke(12) · wiring-e2e(15,testnet) · keeper · reconcile · fund · grpc-probe
 │   ├── isub.testnet.json         testnet 部署记录（package id；可入库 / explorer 可验）
 │   ├── .keeper/                  keeper 运行时（watch 集/journal/锁；gitignore）
 │   └── .secrets/                 持久 actor 私钥（gitignore，不入库）
@@ -148,6 +156,7 @@ iSub/
     ├── phase0-contract-design.md 决策/对象/函数×不变量/开放问题
     ├── test-plan.md              测试方案（33 tests，已全绿）
     ├── self-audit.md             安全自审报告（英文，judge-facing）
+    ├── privacy.md                隐私模型（不可关联≠匿名；burner/zkLogin/隐形地址；不做混币）
     ├── scope-and-timeline.md     Tier 0–3 + 日历
     ├── roadmap.md                交付 roadmap + 产品 H1/H2/H3
     ├── phase2-demo-app.md        商家 demo app 规划（Phase 2）

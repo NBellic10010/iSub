@@ -7,7 +7,7 @@
 | **Build** | Compiles under Sui CLI 1.71.1 |
 | **Assessment type** | Internal adversarial self-assessment — *not* a third-party audit |
 | **Date** | 2026-06-03 (initial) · 2026-06-11 (round 2: payment-infra standard) · 2026-06-13 (round 4: production hardening) |
-| **Result** | 8 findings resolved · 1 tracked (open) · 1 design tradeoff accepted & mitigated · **72/72 functional + regression tests passing** |
+| **Result** | 9 findings resolved · several tracked (off-chain pipeline hardening) · 1 design tradeoff accepted & mitigated · **72/72 Move + 35 biller-pipeline tests passing** |
 
 ---
 
@@ -72,6 +72,7 @@ We consider surfacing our own weaknesses more trustworthy than presenting none �
 | **M-2** | `Plan.active` had no setter — dead deactivation check; merchant cannot retire a plan | Medium | ✅ Resolved |
 | **M-3** | `authorized_keeper` is copied from the plan; subscriber doesn't explicitly approve it | Low | ✅ Resolved (with F-06) |
 | **F-06** | Terms-binding omitted the payout merchant/keeper — a same-price plan-swap could redirect funds | Medium-High | ✅ Resolved |
+| **F-07** | Biller orphan-recovery re-derived a landed batch by amount-matching the live unbilled set → a reordered/added record could mis-attribute and **double-charge** (off-chain pipeline) | High | ✅ Resolved |
 
 ---
 
@@ -197,13 +198,36 @@ The mechanisms that actually *stop* a merchant are unchanged and pre-existing: `
 
 ---
 
+### F-07 — Biller orphan-recovery double-charge (off-chain PAYG pipeline)
+
+**Severity:** High · **Status:** Resolved · *(found by the PAYG/Fixed contract+pipeline audit, Round 5)*
+
+**Description.** Money-correctness lives off-chain too. When a metered charge LANDS on-chain but the biller crashes / loses the ack before recording it, the next flush's `recoverOrphan` must mark the charged records billed instead of charging again. It identified *which* records the landed charge covered by **re-deriving the batch from the current unbilled set** — greedily prefix-summing (oldest-first) until the running total equalled the orphan's amount. The `submit` journal stored only `amount`+`seq`, not the batch membership. So if a NEW usage record arrived (or sorted) before the original batch boundary between the lost charge and recovery, a *different* prefix could sum to the same total: recovery then marked the WRONG records billed, leaving the truly-charged records "unbilled" → **re-charged on the next flush (a real on-chain double-debit)**. When no prefix matched the total exactly, recovery bailed and the orphan's records were re-charged outright (net 2× the same usage).
+
+**Impact.** A subscriber is charged on-chain twice for the same usage (bounded by the mandate caps, but a real overcharge), and a record's revenue is mis-attributed/lost — silently, since PAYG had no reconciliation report to surface it (tracked below). Contract-layer idempotency (`charge_seq`) is intact; this is purely the off-chain biller's record-keeping.
+
+**Resolution.** The `submit` journal now records the EXACT `usageIds` of the batch (`JournalEntry.usageIds`; SQL `charges.usage_ids` column + idempotent migration). `recoverOrphan` marks precisely those records billed — membership is authoritative, never reconstructed by amount — so a reordered/added record can never steal the attribution. The rewrite also processes ALL outstanding orphans (oldest-first), closing the prior "one orphan per call" gap; a legacy `submit` with no recorded membership is surfaced for manual reconcile rather than guessed.
+
+**Verification.** ✅ `biller-smoke` scenario I — after a lost-ack orphan `[iA,iB]=5`, a new record `iC=4` that sorts *before* the batch: on-chain spend settles to exactly **9** (Σ distinct usage), not 14; all records billed once. The test was confirmed to catch the regression (removing the recorded `usageIds` fails the suite at the recovery scenarios). 35/35 biller-pipeline assertions green.
+
+---
+
 ### Open findings — tracked, not yet remediated
 
-One remains, bounded by existing protections.
+Several remain — all bounded by existing protections, or off-chain liveness/ops with no user-fund loss.
 
 - **M-1 — Rolling-window 2× burst · Low-Medium · open.** The PAYG rate window resets `window_start = now` on expiry, so a payee can charge `rate_cap` just before a boundary and again just after — ~2× `rate_cap` in a short real interval. Bounded by `total_budget` (lifetime) and the user's `max_per_charge` (per charge); since `rate_cap` is merchant-defined and not a user protection against the merchant itself (F-05), user impact is limited. Note: a fixed/tumbling window does **not** remove the boundary burst — the correct fix for a hard "≤ `rate_cap` over any window" guarantee is an O(1) token bucket (continuous refill). Deferred pending whether `rate_cap` is meant as a hard throughput ceiling or merchant-side pacing.
 
 *(M-3 — implicitly-trusted keeper — was resolved together with F-06: `expected_keeper` is now bound at authorization.)*
+
+**PAYG/Fixed pipeline audit (Round 5) — tracked, off-chain, no user-fund loss:**
+- **FIXED cadence forward-drift** — `last_charged_ms = now` (the F-01 anti-drain fix) makes billing "from last actual charge," so a late keeper silently forgives (forfeits) a period. Intended *forgiveness*, but flagged for an explicit product decision: forgive vs bill-every-period (catch-up).
+- **Keeper due-check ignores `not_before_ms`** — during a trial / first-charge delay the keeper attempts-and-aborts every tick (wasted gas), because its due-check omits the not-before gate the contract enforces. Add the gate to the due-check. *(Fix this before relying on long trials.)*
+- **No standalone PAYG reconciliation** — `reconcile()` encodes the keeper's journal conventions; pointed at a biller store it misreports. A biller-aware reconciliation is needed (this is also why F-07 was unobservable end-to-end).
+- **PAYG service serviceability is a one-way latch** — once denied (budget/charge failure) it never re-enables on recovery (top-up / new window); re-enable on `charge.succeeded`.
+- **Non-durable default store** — `memBillerStore`/`memoryStore` are the zero-config defaults but lose the journal + lock on restart, voiding the orphan-recovery guarantee. Production must use the SQL/file store; default-to-safe (or refuse-without-lock) is tracked.
+- **u64-overflow DoS (merchant-self-inflicted, Low)** — an unbounded `interval_ms` / `rate_window_ms` can overflow the additive gate and brick a mandate (no fund loss; bound the inputs at plan creation).
+- **PAYG has no dunning/lifecycle** — the `past_due → lapsed` state machine is FIXED-only; PAYG emits only a one-shot carry. Add a PAYG dunning layer.
 
 ---
 
@@ -228,6 +252,7 @@ We are explicit about what on-chain enforcement does *not* cover:
 |------|--------|
 | Contract compiles (`sui move build`) | ✅ Passing |
 | Functional + regression suite (F-01…F-06, M-2 + §7.4 invariants + access control + version/lifecycle) | ✅ 72/72 passing (`sui move test`) |
+| Off-chain pipeline regression suite (biller idempotency, lost-ack/crash recovery, **F-07** reorder double-charge, single-instance lock) | ✅ 35 `biller-smoke` assertions passing (mem + SQL) |
 | End-to-end validation on localnet **and Sui testnet** (lifecycle + keeper + PAYG idempotency/refund + dunning/reconciliation) | ✅ 19 + 7 + 16 + 12 assertions green on both networks |
 | Upgrade safety — version gate on all shared objects + permissionless one-way `migrate_*`; object reclaim (`close_*`) | ✅ Added (round 4); `version` field in place before mainnet freeze |
 | Formal verification of safety invariants (Sui Prover) | ⬜ Roadmap |
@@ -253,6 +278,7 @@ We are explicit about what on-chain enforcement does *not* cover:
 | 2026-06-11 | **Production hardening.** Object `version` gate + permissionless `migrate_*` (upgrade safety, error 27); `close_account`/`close_mandate`/`close_plan` (storage-rebate reclaim, errors 28/29). Suite → **68 tests**, all green. |
 | 2026-06-11 | **Round 4 (terms-binding completeness).** **F-06 fixed** — `authorize_fixed`/`authorize_metered` now bind `expected_merchant` (and `expected_keeper` for PAYG), closing the merchant/keeper plan-swap gap; **resolves M-3**. Suite → **72 tests**, all green. |
 | 2026-06-13 | **Round 4 (production hardening — not findings).** Added **version gate** (`version` field on all shared objects + per-entry check + permissionless one-way `migrate_*`; errors 27) — the pre-mainnet window for the struct-frozen field — and **object reclaim** (`close_account`/`close_mandate`/`close_plan`, errors 28/29; storage-rebate). Suite → **68 tests**, all green; e2e smoke now exercises close (19 assertions). |
+| 2026-06-19 | **Round 5 (PAYG/Fixed contract+pipeline audit).** Adversarial cross-layer audit (contract + keeper + biller + reconcile); 16 findings verified, most contract residuals re-classified as bounded design tradeoffs. **F-07 fixed** — biller orphan-recovery now records exact `usageIds` (`JournalEntry.usageIds` + SQL `charges.usage_ids` column/migration), marks precisely the landed records billed (no reorder double-charge), and recovers all orphans oldest-first. Regression: `biller-smoke` scenario I (35 assertions, mem + SQL). Remaining pipeline items (FIXED cadence drift, keeper `not_before` due-check, PAYG reconcile/dunning, serviceability latch, durable-default store, input overflow) logged as tracked. Scheduler (phased pricing / scheduled up-downgrade) feasibility assessed separately — deferred. |
 
 ---
 

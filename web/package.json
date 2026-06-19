@@ -1,0 +1,28 @@
+{
+  "name": "@isub/web",
+  "private": true,
+  "version": "0.0.1",
+  "description": "iSub web frontend (Next.js App Router): home + subscriber dashboard + merchant dashboard. Reuses @isub/sdk for all on-chain reads/writes.",
+  "scripts": {
+    "dev": "next dev --experimental-https",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@isub/sdk": "*",
+    "@mysten/dapp-kit-react": "^2.1.2",
+    "@mysten/sui": "^2.17.0",
+    "next": "^16.2.9",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.1",
+    "@types/node": "^25.9.2",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^6.0.3"
+  }
+}

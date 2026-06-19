@@ -7,7 +7,7 @@
 // Run: `npm run pricing:smoke` (localnet) or `npm run pricing-smoke:testnet`.
 import { IsubClient, keypairSigner, priceUsageMulti, type RateCard } from '../src/index';
 import { IsubBiller, memBillerStore } from '../src/biller';
-import { clientFor, actor, suiBalance, loadDeployment, fmt, explorer, NETWORK } from './env';
+import { clientFor, actor, suiBalance, loadDeployment, fmt, sleep, explorer, NETWORK } from './env';
 
 const LOCAL = NETWORK === 'localnet';
 const SUI = 1_000_000_000n;
@@ -60,6 +60,12 @@ async function main(): Promise<void> {
     totalBudget: BUDGET, expiryMs, maxPerCharge: RATE_CAP,
   });
   console.log(`  account ${accountId.slice(0, 10)}… funded ${fmt(DEPOSIT)} · mandate ${mandateId.slice(0, 10)}…`);
+
+  // `not_before_ms` is stamped from the on-chain Clock at authorize, which can run slightly AHEAD
+  // of the local wall clock. The biller's `spendableNow` gate is local, so an immediate flush would
+  // conservatively skip ("not chargeable yet") on that skew. A real biller flushes on a window loop;
+  // here we wait a beat so local time clears not_before before the first flush.
+  await sleep(LOCAL ? 500 : 2500);
 
   // The pricing layer drives settlement: biller holds the merchant's RateCard, signs as keeper.
   const store = memBillerStore();

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ConnectButton } from '@mysten/dapp-kit-react/ui';
-import { MandateStatus, errorName, abortCodeOf } from '@isub/sdk';
-import type { MandateState, PlanState } from '@isub/sdk';
+import { MandateStatus, errorName, abortCodeOf, buildConsent } from '@isub/sdk';
+import type { MandateState, PlanState, Consent, AuthorizeFixedArgs } from '@isub/sdk';
 import { useIsub } from './isub';
 
 const MIST = 1_000_000_000n;
@@ -46,7 +46,7 @@ const s = {
 };
 
 export function App() {
-  const { isub, signer, address, connected, network } = useIsub();
+  const { isub, signer, signMessage, address, connected, network } = useIsub();
   const ns = `isub:${network}:${address ?? '-'}`;
 
   const [accountId, setAccountId] = useState<string | null>(null);
@@ -59,6 +59,8 @@ export function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [pendingConsent, setPendingConsent] = useState<Consent | null>(null);
+  const [consentSig, setConsentSig] = useState<string | null>(null);
 
   const refreshAccount = useCallback(
     async (id: string) => {
@@ -162,23 +164,35 @@ export function App() {
       return `Terms: ${fmtSui(q.price)} every ${Number(q.intervalMs) / 1000}s · merchant ${short(q.merchant)}`;
     });
 
-  const doSubscribe = () =>
-    run('Authorizing subscription…', async () => {
+  // L1b trusted-display: derive the human-readable terms AND the exact expected_* from the SAME
+  // on-chain plan read (the quote) — not the dApp's claims — and show them BEFORE the user signs.
+  const doReviewConsent = () =>
+    run('Building consent…', async () => {
       if (!quote) throw new Error('load the plan terms first');
-      const { mandateId } = await isub.authorizeFixed(signer!, {
+      const consent = buildConsent(quote, {
         accountId: accountId!,
-        planId: planId.trim(),
-        // Terms-binding: echo what the user was shown. In production these MUST come from a
-        // trusted display surface — here we bind to the quote we just rendered (demo simplification).
-        expectedPrice: quote.price,
-        expectedIntervalMs: quote.intervalMs,
-        expectedMerchant: quote.merchant,
         totalBudget: toMist(budgetSui),
         expiryMs: BigInt(Date.now() + 30 * DAY_MS),
       });
+      setConsentSig(null);
+      setPendingConsent(consent);
+      return 'Review the exact terms below, then sign to authorize.';
+    });
+
+  const doSignAndSubscribe = () =>
+    run('Awaiting wallet signature…', async () => {
+      const consent = pendingConsent!;
+      if (consent.mode !== 'fixed') throw new Error('this demo subscribes to Fixed plans only');
+      // 1) Sign the human-readable intent (signPersonalMessage) — a verifiable consent receipt.
+      const { signature } = await signMessage!(consent.intentMessage);
+      setConsentSig(signature);
+      // 2) Authorize with the EXACT expected_* captured in the consent (terms-binding is now meaningful).
+      const { mandateId } = await isub.authorizeFixed(signer!, consent.authorize as AuthorizeFixedArgs);
       rememberMandate(mandateId);
+      localStorage.setItem(`${ns}:consent:${mandateId}`, JSON.stringify({ message: consent.intentMessage, signature, address }));
+      setPendingConsent(null);
       await refreshSubs([...subs.map((r) => r.id), mandateId]);
-      return `Subscribed — mandate ${short(mandateId)} (no funds moved; charges pull within budget)`;
+      return `Subscribed — mandate ${short(mandateId)} · consent signed & stored (no funds moved)`;
     });
 
   const doCharge = (row: Sub) =>
@@ -276,18 +290,53 @@ export function App() {
             </div>
           )}
 
-          {/* 3 — Subscribe */}
+          {/* 3 — Subscribe: review terms → sign consent → authorize (L1b trusted-display) */}
           {accountId && quote && (
             <div style={s.card}>
-              <h2 style={s.h2}>③ Subscribe (authorize a capped mandate)</h2>
+              <h2 style={s.h2}>③ Subscribe — review &amp; sign consent</h2>
               <p style={{ margin: '0 0 10px', ...s.muted }}>
-                Authorizing signs once and moves <b>no funds</b>. Charges pull from your Account up to the budget; you
-                can cancel anytime.
+                Authorizing signs once and moves <b>no funds</b>. You sign a human-readable consent built from the
+                on-chain plan; charges then pull up to your budget. Cancel anytime.
               </p>
-              budget <input style={s.input} value={budgetSui} onChange={(e) => setBudgetSui(e.target.value)} /> SUI
-              <button style={s.btn} disabled={!!busy} onClick={doSubscribe}>
-                Subscribe
+              budget{' '}
+              <input
+                style={s.input}
+                value={budgetSui}
+                onChange={(e) => {
+                  setBudgetSui(e.target.value);
+                  setPendingConsent(null); // terms changed → re-review
+                }}
+              />{' '}
+              SUI
+              <button style={s.btn} disabled={!!busy} onClick={doReviewConsent}>
+                Review consent
               </button>
+              {pendingConsent && (
+                <div style={{ marginTop: 12, border: '1px solid #e1e1ee', borderRadius: 8, padding: 12, background: '#fafaff' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>You are authorizing exactly:</div>
+                  <ul style={{ margin: '0 0 10px', paddingLeft: 18, fontSize: 13, lineHeight: 1.5 }}>
+                    {pendingConsent.terms.map((t, i) => (
+                      <li key={i}>{t}</li>
+                    ))}
+                  </ul>
+                  <div style={s.muted}>You will sign this exact statement (verifiable later):</div>
+                  <pre style={{ ...s.mono, whiteSpace: 'pre-wrap', background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 8, margin: '4px 0 10px' }}>
+                    {pendingConsent.intentMessage}
+                  </pre>
+                  <button style={s.btn} disabled={!!busy} onClick={doSignAndSubscribe}>
+                    Sign consent &amp; subscribe
+                  </button>
+                  <div style={{ ...s.muted, marginTop: 8 }}>
+                    In production this panel is rendered by a <b>neutral surface</b> (wallet or iSub-hosted), not the
+                    dApp — the signed intent stays verifiable via <code>verifyConsentSignature</code>.
+                  </div>
+                </div>
+              )}
+              {consentSig && (
+                <div style={{ ...s.info, marginTop: 8 }}>
+                  ✓ consent signed: <span style={s.mono}>{consentSig.slice(0, 18)}…</span>
+                </div>
+              )}
             </div>
           )}
 

@@ -1,0 +1,10 @@
+{
+  "name": "isub-monorepo",
+  "private": true,
+  "version": "0.0.1",
+  "description": "iSub monorepo — Move contracts, @isub/sdk, and the web frontend share one install so @mysten/sui/react resolve to a single copy.",
+  "workspaces": [
+    "sdk",
+    "web"
+  ]
+}

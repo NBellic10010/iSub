@@ -197,6 +197,31 @@ async function main(): Promise<void> {
   check(mG2.spentTotal === 50n && mG2.chargeSeq === 1n, 'restart recovery: NO double-charge (spent still 50)');
   check(g2[0]!.charged === 50n && (await storeG.unbilled('0xg')).length === 0, 'restart reconciled the orphan + marked billed');
 
+  // ===== Scenario I: orphan recovery is membership-exact (a reordered record can't double-charge) =====
+  // Regression for the recoverOrphan prefix-sum bug. After a lost-ack orphan, a NEW usage that
+  // sorts BEFORE the orphan's batch must NOT perturb attribution: recovery marks the EXACT landed
+  // records billed (by usageId), so nothing is charged twice on-chain. Pre-fix this net-double-charged
+  // (on-chain spent 14 instead of 9), because the amount-mismatched prefix bailed and the orphan's
+  // records — still unbilled — were re-charged.
+  console.log('\n• scenario I: orphan recovery is membership-exact (no double-charge on reorder)');
+  const chainI = new FaithfulChain(mkMandate({ id: '0xi', totalBudget: 1000n, rateCap: 1000n, maxPerCharge: 1000n }), 10_000n);
+  const storeI = memBillerStore();
+  const crashedI = new IsubBiller(chainI, SIG, storeI, { policy: { maxRetries: 1 } }); // 1 attempt → orphan persists
+  await crashedI.recordUsage({ mandateId: '0xi', amount: 2n, usageId: 'iA', atMs: 5 });
+  await crashedI.recordUsage({ mandateId: '0xi', amount: 3n, usageId: 'iB', atMs: 6 });
+  chainI.now = 0;
+  chainI.lostAckLeft = 1;
+  await crashedI.flush('0xi', 0); // submit [iA,iB]=5 lands, ack lost → orphan; both still unbilled
+  const mI0 = await chainI.getMandate();
+  check(mI0.spentTotal === 5n && mI0.chargeSeq === 1n && (await storeI.unbilled('0xi')).length === 2, 'orphan: [iA,iB]=5 landed on-chain, both records still unbilled');
+  await crashedI.recordUsage({ mandateId: '0xi', amount: 4n, usageId: 'iC', atMs: 0 }); // sorts BEFORE the orphan batch
+  const restartedI = new IsubBiller(chainI, SIG, storeI, {}); // fresh instance over the same store
+  await restartedI.flush('0xi', 0);
+  const mI1 = await chainI.getMandate();
+  check(mI1.spentTotal === 9n, `no double-charge: on-chain spent == sum of distinct usage (9) — got ${mI1.spentTotal}`);
+  check(mI1.chargeSeq === 2n, 'exactly two on-chain charges (recovered orphan + the new record)');
+  check((await storeI.unbilled('0xi')).length === 0, 'all three records billed exactly once');
+
   // ===== Scenario H: cross-instance lock (two billers can't bill the same tenant) =====
   console.log('\n• scenario H: cross-instance single-flight lock (SQL)');
   const dbL = openDb(':memory:');

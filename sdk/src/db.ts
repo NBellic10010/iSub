@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS charges (
   digest      TEXT,
   reason      TEXT,
   state       TEXT,
+  usage_ids   TEXT,
   at_ms       INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_charges_tenant_mandate ON charges (merchant_id, mandate_id, id);
@@ -113,6 +114,8 @@ function migrate(db: Db): void {
   addColumnIfMissing(db, 'usage_records', 'meter_key', 'TEXT');
   addColumnIfMissing(db, 'usage_records', 'qty', 'TEXT'); // bigint-as-string, like amount
   addColumnIfMissing(db, 'usage_records', 'rate_card_version', 'INTEGER');
+  // Exact batch membership on a biller `submit` (JSON string[]), for safe orphan recovery.
+  addColumnIfMissing(db, 'charges', 'usage_ids', 'TEXT');
 }
 
 /** Open (or create) the database at `path` (`:memory:` for tests), apply the schema, and migrate. */
