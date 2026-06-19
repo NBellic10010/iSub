@@ -90,7 +90,9 @@ export class IsubService {
     // D3 threshold: settle early when un-settled usage is large (bounds the at-risk window).
     if (this.flushThreshold > 0n && s.pending >= this.flushThreshold) {
       s.pending = 0n;
-      void this.biller.flush(mandateId); // non-blocking; biller single-flight serializes vs the window loop
+      // Best-effort early settle: the window loop retries, so a rejection here (transient/lock) must
+      // NOT become an unhandled rejection that crashes the service process and takes down every tenant.
+      void this.biller.flush(mandateId).catch((e) => console.error('isub service: early flush failed (window loop will retry):', e instanceof Error ? e.message : e));
     }
     return { ok: true, status: 200 };
   }
@@ -124,7 +126,9 @@ export class IsubService {
     s.pending += amount;
     if (this.flushThreshold > 0n && s.pending >= this.flushThreshold) {
       s.pending = 0n;
-      void this.biller.flush(mandateId); // non-blocking; biller single-flight serializes vs the window loop
+      // Best-effort early settle: the window loop retries, so a rejection here (transient/lock) must
+      // NOT become an unhandled rejection that crashes the service process and takes down every tenant.
+      void this.biller.flush(mandateId).catch((e) => console.error('isub service: early flush failed (window loop will retry):', e instanceof Error ? e.message : e));
     }
     return { ok: true, status: 200 };
   }

@@ -76,7 +76,22 @@ const DEFAULT_DUE_MARGIN_MS = 750;
 const E_INTERVAL_NOT_ELAPSED = 6;
 const TERMINAL: ReadonlySet<MandateLifecycle> = new Set(['lapsed', 'expired', 'revoked']);
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/** Sleep `ms`, but resolve EARLY if `signal` aborts — so an aborted run loop stops promptly instead
+ *  of waiting out a full poll/backoff interval (up to 60s). */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const onAbort = (): void => {
+      clearTimeout(t);
+      resolve();
+    };
+    const t = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 /**
  * Off-chain keeper for Fixed (subscription) mandates, with a persistent billing
@@ -343,14 +358,23 @@ export class IsubKeeper {
     let backoffMs = 0;
     while (!opts.signal?.aborted) {
       try {
-        opts.onTick?.(await this.tick());
+        const r = await this.tick();
         backoffMs = 0;
+        // onTick is a listener: AWAIT + ISOLATE so an async listener's rejection can't escape as an
+        // unhandledRejection, and its failure never affects the sweep or backoff.
+        if (opts.onTick) {
+          try {
+            await opts.onTick(r);
+          } catch (e) {
+            console.error('keeper: onTick listener threw (ignored):', e instanceof Error ? e.message : e);
+          }
+        }
       } catch (e) {
         // tick() isolates per-mandate errors; a throw here is discovery-level (RPC blip).
         backoffMs = Math.min(backoffMs > 0 ? backoffMs * 2 : opts.pollMs * 2, 60_000);
         console.error(`keeper: tick failed (retrying in ${backoffMs}ms):`, e instanceof Error ? e.message : e);
       }
-      await sleep(backoffMs > 0 ? backoffMs : opts.pollMs);
+      await sleep(backoffMs > 0 ? backoffMs : opts.pollMs, opts.signal); // interruptible: abort wakes it
     }
     await this.close();
   }

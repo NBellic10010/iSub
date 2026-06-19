@@ -96,7 +96,8 @@ function holderAlive(holder: string | null): boolean {
 }
 
 /** Row-based single-instance lock over the `locks` table (K-3 liveness). Shared by keeper + biller. */
-function makeLock(db: Db, merchantId: string, lockName: string): { acquireLock(): Promise<void>; releaseLock(): Promise<void> } {
+function makeLock(db: Db, merchantId: string, lockName: string): { acquireLock(): Promise<void>; renewLock(): Promise<void>; releaseLock(): Promise<void> } {
+  const holder = `${HOST}:${process.pid}`;
   return {
     async acquireLock(): Promise<void> {
       const row = db
@@ -113,10 +114,23 @@ function makeLock(db: Db, merchantId: string, lockName: string): { acquireLock()
       db.prepare(
         `INSERT INTO locks (merchant_id, name, holder, heartbeat_ms) VALUES (?, ?, ?, ?)
          ON CONFLICT(merchant_id, name) DO UPDATE SET holder=excluded.holder, heartbeat_ms=excluded.heartbeat_ms`,
-      ).run(merchantId, lockName, `${HOST}:${process.pid}`, Date.now());
+      ).run(merchantId, lockName, holder, Date.now());
+    },
+    async renewLock(): Promise<void> {
+      // Ownership-guarded heartbeat — without this, a healthy long-running holder's heartbeat goes
+      // stale after LOCK_STALE_MS and a second instance can take the lock (split-brain double-flush).
+      // 0 rows updated = we no longer hold it (superseded) → throw so the run loop stands down.
+      const r = db
+        .prepare(`UPDATE locks SET heartbeat_ms = ? WHERE merchant_id = ? AND name = ? AND holder = ?`)
+        .run(Date.now(), merchantId, lockName, holder);
+      if (Number(r.changes) === 0) {
+        throw new IsubError('lock', `lost the ${lockName} lock for merchant ${merchantId} (superseded by another instance)`);
+      }
     },
     async releaseLock(): Promise<void> {
-      db.prepare(`DELETE FROM locks WHERE merchant_id = ? AND name = ?`).run(merchantId, lockName);
+      // Ownership-guarded — never delete a DIFFERENT holder's row (a superseded instance's close()
+      // must not free the new holder's lock).
+      db.prepare(`DELETE FROM locks WHERE merchant_id = ? AND name = ? AND holder = ?`).run(merchantId, lockName, holder);
     },
   };
 }

@@ -59,6 +59,34 @@ async function lockContract(name: string, makeStore: () => KeeperStore): Promise
   await b.releaseLock?.();
 }
 
+// Med-3: the SQL lock must refresh its heartbeat (or a healthy holder self-expires after 120s and a
+// second instance split-brains), and release/renew must be ownership-guarded (a superseded instance
+// must not delete or steal the new holder's lock).
+async function lockOwnership(db: ReturnType<typeof openDb>): Promise<void> {
+  const t = 'own-tenant';
+  const s = sqlStore(db, t); // lockName 'keeper'
+  await s.acquireLock?.();
+  let renewOk = true;
+  try {
+    await s.renewLock?.();
+  } catch {
+    renewOk = false;
+  }
+  check(renewOk, 'sql: renewLock refreshes the heartbeat while we hold the lock');
+  // simulate a foreign instance taking the row (different holder string)
+  db.prepare(`UPDATE locks SET holder = ? WHERE merchant_id = ? AND name = ?`).run('otherhost:999999', t, 'keeper');
+  let renewThrew = false;
+  try {
+    await s.renewLock?.();
+  } catch {
+    renewThrew = true;
+  }
+  check(renewThrew, 'sql: renewLock THROWS after a foreign instance took the lock (superseded → stand down)');
+  await s.releaseLock?.(); // ownership-guarded: must NOT delete the foreign holder's row
+  const row = db.prepare(`SELECT holder FROM locks WHERE merchant_id = ? AND name = ?`).get(t, 'keeper') as unknown as { holder: string } | undefined;
+  check(row?.holder === 'otherhost:999999', "sql: ownership-guarded release does NOT delete a foreign holder's lock");
+}
+
 async function main(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
   const tmpDir = join(here, '..', 'logs', 'store-smoke-tmp');
@@ -73,6 +101,9 @@ async function main(): Promise<void> {
   console.log('\n• single-instance lock (file + sql)');
   await lockContract('file', () => fileStore(join(tmpDir, 'lock')));
   await lockContract('sql', () => sqlStore(db, 'lock-tenant'));
+
+  console.log('\n• sql lock ownership (renew heartbeat + guarded release — Med-3)');
+  await lockOwnership(db);
 
   console.log('\n• SQL multi-tenant isolation');
   const m1 = sqlStore(db, 'm1');

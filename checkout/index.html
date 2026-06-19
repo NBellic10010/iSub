@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Acme API — pricing</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 520px; margin: 8vh auto; padding: 0 20px; line-height: 1.5; }
+      .card { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: 14px; padding: 22px; }
+      h1 { font-size: 22px; margin: 0 0 4px; } .muted { opacity: .65; font-size: 14px; }
+      label { display: block; font-size: 13px; opacity: .7; margin: 14px 0 4px; }
+      input, select { width: 100%; padding: 9px 11px; border-radius: 9px; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); background: transparent; color: inherit; font: inherit; font-size: 14px; box-sizing: border-box; }
+      button { margin-top: 18px; width: 100%; padding: 11px; border-radius: 10px; border: 0; background: #111; color: #fff; font-size: 15px; font-weight: 500; cursor: pointer; }
+      @media (prefers-color-scheme: dark) { button { background: #f2f2f2; color: #111; } }
+      #result { margin-top: 14px; font-size: 14px; font-family: ui-monospace, monospace; min-height: 20px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Acme API</h1>
+      <p class="muted">Pay-as-you-go inference. Subscribe with iSub — non-custodial, cancel anytime.</p>
+
+      <label for="planId">Plan id (0x…)</label>
+      <input id="planId" placeholder="0x… (a plan you created on this network)" />
+      <label for="budget">Budget (SUI)</label>
+      <input id="budget" value="0.2" />
+      <label for="network">Network</label>
+      <select id="network"><option value="testnet">testnet</option><option value="localnet">localnet</option></select>
+
+      <button id="subscribe">Subscribe with iSub</button>
+      <div id="result"></div>
+    </div>
+    <script type="module" src="/src/demo.ts"></script>
+  </body>
+</html>

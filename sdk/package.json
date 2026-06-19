@@ -5,7 +5,7 @@
   "type": "module",
   "description": "iSub — non-custodial recurring/metered pull-payment primitive on Sui. TS SDK + runnable scripts (e2e smoke, keeper).",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.5.0"
   },
   "exports": {
     ".": "./src/index.ts",

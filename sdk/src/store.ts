@@ -64,6 +64,8 @@ export interface KeeperStore {
   readJournal(): Promise<JournalEntry[]>;
   /** Throw if another live instance holds the lock. */
   acquireLock?(): Promise<void>;
+  /** Refresh our heartbeat; throw if we've been superseded (so the run loop can stand down). */
+  renewLock?(): Promise<void>;
   releaseLock?(): Promise<void>;
 }
 

@@ -59,6 +59,8 @@ export interface BillerStore {
   appendJournal(e: JournalEntry): Promise<void>;
   readJournal(): Promise<JournalEntry[]>;
   acquireLock?(): Promise<void>;
+  /** Refresh our heartbeat; throw if we've been superseded (so run() can stand down). */
+  renewLock?(): Promise<void>;
   releaseLock?(): Promise<void>;
 }
 
@@ -94,7 +96,22 @@ export interface BillerPolicy {
   maxRetries?: number;
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/** Sleep `ms`, but resolve EARLY if `signal` aborts — so an aborted run loop stops promptly instead
+ *  of waiting out a full poll/backoff interval (up to 60s). */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const onAbort = (): void => {
+      clearTimeout(t);
+      resolve();
+    };
+    const t = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 const min = (...xs: bigint[]): bigint => xs.reduce((a, b) => (a < b ? a : b));
 
 /**
@@ -140,8 +157,10 @@ export class IsubBiller {
     await this.store.acquireLock?.();
     this.initialized = true;
   }
-  /** Release the lock. */
+  /** Release the lock. No-op if we never acquired it — so a failed/contended start never frees
+   *  (deletes) a DIFFERENT live instance's lock. */
   async close(): Promise<void> {
+    if (!this.initialized) return;
     await this.store.releaseLock?.();
   }
 
@@ -303,9 +322,18 @@ export class IsubBiller {
   private async recoverOrphan(mandateId: string, nowMs: number): Promise<bigint> {
     const mine = (await this.store.readJournal()).filter((e) => e.mandateId === mandateId && e.seq != null);
     const settledSubmitSeqs = new Set(mine.filter((e) => e.kind === 'charged').map((e) => e.seq! - 1));
-    const orphans = mine
-      .filter((e) => e.kind === 'submit' && !settledSubmitSeqs.has(e.seq!))
-      .sort((a, b) => a.seq! - b.seq!);
+    // Among MULTIPLE submits at the same seq (a cap-abort / transient that did NOT advance the chain,
+    // then a retry re-submitting at that same seq), only the LAST one could have landed: any earlier
+    // landing would have advanced charge_seq, forcing the next submit to a higher seq (and settle()
+    // runs recoverOrphan at the top of every attempt, so a landed-but-lost-ack submit is recovered
+    // BEFORE the next submit). So collapse to the last submit per unsettled seq — recovering an
+    // earlier same-seq submit would mark the wrong records billed AND double-count the ledger. This
+    // correctness relies on the single-biller invariant the store lock enforces (see renewLock).
+    const lastSubmitBySeq = new Map<number, JournalEntry>();
+    for (const e of mine) {
+      if (e.kind === 'submit' && !settledSubmitSeqs.has(e.seq!)) lastSubmitBySeq.set(e.seq!, e); // later wins
+    }
+    const orphans = [...lastSubmitBySeq.values()].sort((a, b) => a.seq! - b.seq!);
     if (orphans.length === 0) return 0n;
 
     const chainSeq = Number((await this.chain.getMandate(mandateId)).chargeSeq);
@@ -351,15 +379,35 @@ export class IsubBiller {
 
   /** Poll: flush all mandates with unbilled usage every `pollMs` until aborted. */
   async run(opts: { pollMs: number; signal?: AbortSignal; onTick?: (r: FlushResult[]) => void }): Promise<void> {
-    while (!opts.signal?.aborted) {
-      try {
-        opts.onTick?.(await this.flush());
-      } catch (e) {
-        console.error('biller: flush failed:', e instanceof Error ? e.message : e);
+    // Fail-fast: take the lock BEFORE the loop so contention is terminal (don't spin retrying it).
+    await this.init();
+    try {
+      let backoffMs = 0;
+      while (!opts.signal?.aborted) {
+        try {
+          await this.store.renewLock?.(); // ownership heartbeat; throws IsubError('lock') if superseded
+          const r = await this.flush();
+          backoffMs = 0;
+          // onTick is a listener: AWAIT it (so an async listener's rejection can't escape as an
+          // unhandledRejection) and ISOLATE it (its failure must never affect billing or backoff).
+          if (opts.onTick) {
+            try {
+              await opts.onTick(r);
+            } catch (e) {
+              console.error('biller: onTick listener threw (ignored):', e instanceof Error ? e.message : e);
+            }
+          }
+        } catch (e) {
+          // A lock error (contended / superseded mid-run) is TERMINAL — stand down, don't double-bill.
+          if (e instanceof IsubError && e.code === 'lock') throw e;
+          backoffMs = Math.min(backoffMs > 0 ? backoffMs * 2 : opts.pollMs * 2, 60_000); // transient → back off
+          console.error(`biller: tick failed (retry in ${backoffMs}ms):`, e instanceof Error ? e.message : e);
+        }
+        await sleep(backoffMs > 0 ? backoffMs : opts.pollMs, opts.signal); // interruptible: abort wakes it
       }
-      await sleep(opts.pollMs);
+    } finally {
+      await this.close(); // always release the lock — even on the terminal lock-loss throw above
     }
-    await this.close();
   }
 }
 

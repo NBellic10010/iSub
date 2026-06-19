@@ -5,6 +5,7 @@
   "description": "iSub monorepo — Move contracts, @isub/sdk, and the web frontend share one install so @mysten/sui/react resolve to a single copy.",
   "workspaces": [
     "sdk",
-    "web"
+    "web",
+    "checkout"
   ]
 }

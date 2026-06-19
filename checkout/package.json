@@ -1,0 +1,18 @@
+{
+  "name": "@isub/checkout",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "iSub Checkout — the embeddable, iframe-isolated subscription consent widget. Merchants drop the loader on their site; the consent terms are read on-chain inside the iframe (trusted display).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  }
+}

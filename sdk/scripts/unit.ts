@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileStore } from '../src/store-file';
 import { memoryStore } from '../src/store';
-import { IsubKeeper, ChargeMode, MandateStatus, scheduleLag, priceUsage, priceUsageMulti, assertValidRateCard, assertRateCardFits, buildConsent, verifyConsentSignature } from '../src/index';
+import { IsubKeeper, ChargeMode, MandateStatus, scheduleLag, priceUsage, priceUsageMulti, assertValidRateCard, assertRateCardFits, buildConsent, verifyConsentSignature, IsubAbortError } from '../src/index';
 import type { IsubClient, IsubSigner, MandateState, RateCard, AuthorizeFixedArgs, AuthorizeMeteredArgs } from '../src/index';
 import { IsubAgent, type SpendPolicy } from '../src/agent';
 import { IsubBiller, memBillerStore, type BillerChain } from '../src/biller';
@@ -413,6 +413,66 @@ async function testConsent(): Promise<void> {
   check((await verifyConsentSignature(msg, signature, '0xdeadbeef')) === false, 'wrong claimed address fails verification');
 }
 
+// ===== recoverOrphan same-seq (High-1): cap-abort then same-seq lost-ack must recover EXACTLY once =====
+async function testRecoverOrphanSameSeq(): Promise<void> {
+  console.log('\n• recoverOrphan same-seq (cap-abort then same-seq lost-ack → recover once, no double-count)');
+  const store = memBillerStore();
+  let calls = 0;
+  let chainSeq = 0n;
+  const chain = {
+    getMandate: async (): Promise<MandateState> => ({
+      ...DUE_FIXED, id: '0xM', mode: ChargeMode.Payg, accountId: '0xACCT', chargeSeq: chainSeq,
+      maxPerCharge: 1_000_000n, totalBudget: 1_000_000n, rateCap: 1_000_000n, rateWindowMs: 10_000n,
+      windowStartMs: 0n, windowSpent: 0n,
+    }),
+    getAccount: async () => ({ id: '0xACCT', owner: '0xu', balance: 1_000_000n }),
+    chargeMetered: async () => {
+      calls++;
+      if (calls === 1) throw new IsubAbortError(9); // over-budget: nothing lands, charge_seq stays 0
+      chainSeq += 1n; // the 2nd submit at the SAME seq lands…
+      throw new Error('network timeout — ack lost'); // …but the ack is lost (transient)
+    },
+  } as unknown as BillerChain;
+  const biller = new IsubBiller(chain, DUMMY_SIGNER, store, {});
+  await biller.recordUsage({ mandateId: '0xM', amount: 30n, usageId: 'u1' });
+  await biller.flush('0xM', 1000);
+  const charged = (await store.readJournal()).filter((e) => e.kind === 'charged');
+  check(calls === 2, `two submits hit the same charge_seq (got ${calls} charge attempts)`);
+  check(charged.length === 1, `exactly ONE charged entry after recovery (got ${charged.length}) — same-seq not double-recovered`);
+  check(charged[0]?.reason === 'recovered' && charged[0]?.amount === '30', 'recovered the landed charge once, amount 30 (not 60)');
+  check((await store.unbilled('0xM')).length === 0, 'the record is billed exactly once');
+}
+
+// ===== biller.run lifecycle: abort interrupts the sleep, and an async onTick can't escape =====
+async function testBillerRunLifecycle(): Promise<void> {
+  console.log('\n• biller.run lifecycle (abort interrupts sleep; async onTick rejection isolated)');
+  const seen: unknown[] = [];
+  const onUnhandled = (e: unknown): void => {
+    seen.push(e);
+  };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const ac = new AbortController();
+    const biller = new IsubBiller({} as unknown as BillerChain, DUMMY_SIGNER, memBillerStore(), {});
+    let resolved = false;
+    // pollMs is huge; without an interruptible sleep, abort wouldn't take effect for 30s.
+    // onTick is ASYNC and rejects; without isolation it escapes as an unhandledRejection.
+    const p = biller
+      .run({ pollMs: 30_000, signal: ac.signal, onTick: async () => { throw new Error('listener boom'); } })
+      .then(() => {
+        resolved = true;
+      });
+    await new Promise((r) => setTimeout(r, 80)); // let the first tick run + enter the long sleep
+    ac.abort();
+    await Promise.race([p, new Promise((r) => setTimeout(r, 1500))]);
+    check(resolved, 'run() exits promptly on abort (interruptible sleep, not stuck for pollMs)');
+    await new Promise((r) => setTimeout(r, 30)); // give any floated rejection a chance to surface
+    check(seen.length === 0, 'async onTick rejection does NOT escape as an unhandledRejection');
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+}
+
 async function main(): Promise<void> {
   testCoreIsomorphism();
   await testStore();
@@ -424,6 +484,8 @@ async function main(): Promise<void> {
   testPricing();
   testPricingFits();
   await testPricedIngest();
+  await testRecoverOrphanSameSeq();
+  await testBillerRunLifecycle();
   await testConsent();
   console.log(`\n${failed === 0 ? '✅' : '❌'} backend unit: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
