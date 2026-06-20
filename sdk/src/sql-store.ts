@@ -355,3 +355,49 @@ export function sqlScheduleStore(db: Db, merchantId: string, lockName = 'schedul
     ...makeLock(db, merchantId, lockName),
   };
 }
+
+// ===== per-mandate usage / charge time-series (cross-tenant, by mandate id) =====
+// Powers the per-mandate usage chart. Read-only; queried by mandate_id alone (at hackathon scale a
+// scan is fine — add a (mandate_id) index if it grows). Mandate data is on-chain-public, so the
+// gateway serves these without an api-key (like the /relations/* reads).
+
+export interface UsagePoint {
+  usageId: string;
+  mandateId: string;
+  amount: bigint;
+  atMs: number;
+  meterKey: string | null;
+  qty: bigint | null;
+  rateCardVersion: number | null;
+  billed: boolean;
+}
+export interface ChargePoint {
+  mandateId: string;
+  kind: string;
+  amount: bigint | null;
+  seq: number | null;
+  digest: string | null;
+  atMs: number;
+}
+
+interface UsageFull { usage_id: string; mandate_id: string; amount: string; at_ms: number; meter_key: string | null; qty: string | null; rate_card_version: number | null; billed: number }
+interface ChargeFull { mandate_id: string; kind: string; amount: string | null; seq: number | null; digest: string | null; at_ms: number }
+
+/** Metered usage records for one mandate, oldest-first (the PAYG usage series). */
+export function usageByMandate(db: Db, mandateId: string, limit = 2000): UsagePoint[] {
+  const rows = db
+    .prepare(`SELECT usage_id, mandate_id, amount, at_ms, meter_key, qty, rate_card_version, billed FROM usage_records WHERE mandate_id = ? ORDER BY at_ms LIMIT ?`)
+    .all(mandateId, limit) as unknown as UsageFull[];
+  return rows.map((r) => ({
+    usageId: r.usage_id, mandateId: r.mandate_id, amount: BigInt(r.amount), atMs: r.at_ms,
+    meterKey: r.meter_key, qty: r.qty != null ? BigInt(r.qty) : null, rateCardVersion: r.rate_card_version, billed: !!r.billed,
+  }));
+}
+
+/** Settled charges for one mandate, oldest-first (the settlement series — `kind='charged'`). */
+export function chargesByMandate(db: Db, mandateId: string, limit = 2000): ChargePoint[] {
+  const rows = db
+    .prepare(`SELECT mandate_id, kind, amount, seq, digest, at_ms FROM charges WHERE mandate_id = ? AND kind = 'charged' ORDER BY at_ms LIMIT ?`)
+    .all(mandateId, limit) as unknown as ChargeFull[];
+  return rows.map((r) => ({ mandateId: r.mandate_id, kind: r.kind, amount: r.amount != null ? BigInt(r.amount) : null, seq: r.seq, digest: r.digest, atMs: r.at_ms }));
+}

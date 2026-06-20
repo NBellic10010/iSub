@@ -94,6 +94,12 @@ export interface BillerPolicy {
   thresholdPct?: number;
   /** Max attempts per flush (re-read + shrink/recover on contention/over-cap). Default 5. */
   maxRetries?: number;
+  /** Max mandates settled CONCURRENTLY per flush — bounds RPC fan-out so a large book can't storm
+   *  the node / self-DoS. Default 8. */
+  concurrency?: number;
+  /** Lock-heartbeat interval (ms) used by `run()`, INDEPENDENT of pollMs/backoff. Keep it well below
+   *  the store's lease TTL (sqlBillerStore: 120s) or the lock self-expires into split-brain. Default 40_000. */
+  leaseRenewMs?: number;
 }
 
 /** Sleep `ms`, but resolve EARLY if `signal` aborts — so an aborted run loop stops promptly instead
@@ -114,6 +120,17 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 const min = (...xs: bigint[]): bigint => xs.reduce((a, b) => (a < b ? a : b));
 
+/** Run `fn` over `items` with at most `limit` concurrent calls, preserving result order. */
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (let i = next++; i < items.length; i = next++) results[i] = await fn(items[i]!, i);
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length) }, () => worker()));
+  return results;
+}
+
 /**
  * How much can be pulled from this mandate RIGHT NOW = min(remaining budget, remaining
  * rate-window, per-charge cap, account balance) — 0 if paused/revoked/expired or before
@@ -131,6 +148,8 @@ export function spendableNow(m: MandateState, accountBalance: bigint, nowMs: num
 export class IsubBiller {
   private readonly thresholdPct: number;
   private readonly maxRetries: number;
+  private readonly concurrency: number;
+  private readonly leaseRenewMs: number;
   private readonly inflight = new Map<string, Promise<unknown>>(); // per-mandate in-process serialization
   private readonly thresholdFired = new Set<string>();
   private readonly onEvent?: (e: BillerEvent) => void;
@@ -146,6 +165,8 @@ export class IsubBiller {
   ) {
     this.thresholdPct = opts.policy?.thresholdPct ?? 80;
     this.maxRetries = opts.policy?.maxRetries ?? 5;
+    this.concurrency = Math.max(1, opts.policy?.concurrency ?? 8);
+    this.leaseRenewMs = opts.policy?.leaseRenewMs ?? 40_000;
     this.onEvent = opts.onEvent;
     if (opts.rateCard) assertValidRateCard(opts.rateCard); // malformed card fails at startup, not at ingest
     this.rateCard = opts.rateCard;
@@ -215,7 +236,18 @@ export class IsubBiller {
   async flush(mandateId?: string, nowMs: number = Date.now()): Promise<FlushResult[]> {
     await this.init();
     const ids = mandateId ? [mandateId] : await this.store.mandatesWithUnbilled();
-    return Promise.all(ids.map((id) => this.flushOne(id, nowMs)));
+    // A5: bound concurrent settles so a large book can't fan out into an RPC storm / self-DoS.
+    // A2: ISOLATE each mandate — one mandate's settle failure (an unreadable/closed mandate, a
+    // lost-ack commit, …) must NOT reject the whole batch nor be retried-forever as a batch failure.
+    // It becomes its own failure FlushResult + a charge.failed event (mirrors the keeper's K-1).
+    return mapWithConcurrency(ids, this.concurrency, (id) =>
+      this.flushOne(id, nowMs).catch((e): FlushResult => {
+        const error = e instanceof Error ? e.message : String(e);
+        const abortCode = e instanceof IsubAbortError ? e.abortCode : null;
+        this.emit({ type: 'charge.failed', mandateId: id, at: nowMs, error, deterministic: abortCode !== null, abortCode });
+        return { mandateId: id, charged: 0n, carried: 0n, reason: undefined };
+      }),
+    );
   }
 
   private flushOne(mandateId: string, nowMs: number): Promise<FlushResult> {
@@ -381,11 +413,17 @@ export class IsubBiller {
   async run(opts: { pollMs: number; signal?: AbortSignal; onTick?: (r: FlushResult[]) => void }): Promise<void> {
     // Fail-fast: take the lock BEFORE the loop so contention is terminal (don't spin retrying it).
     await this.init();
+    // B4: heartbeat on an INDEPENDENT cadence (leaseRenewMs ≪ the store's lease TTL), decoupled from
+    // pollMs/backoff — so a long poll window or a backoff sleep can never starve the renewal and let
+    // the lock self-expire into split-brain. A renew that finds us superseded flags the loop to stand down.
+    let lost: unknown = null;
+    const beat = this.store.renewLock
+      ? setInterval(() => void this.store.renewLock!().catch((e) => (lost = e)), this.leaseRenewMs)
+      : undefined;
     try {
       let backoffMs = 0;
-      while (!opts.signal?.aborted) {
+      while (!opts.signal?.aborted && !lost) {
         try {
-          await this.store.renewLock?.(); // ownership heartbeat; throws IsubError('lock') if superseded
           const r = await this.flush();
           backoffMs = 0;
           // onTick is a listener: AWAIT it (so an async listener's rejection can't escape as an
@@ -405,7 +443,9 @@ export class IsubBiller {
         }
         await sleep(backoffMs > 0 ? backoffMs : opts.pollMs, opts.signal); // interruptible: abort wakes it
       }
+      if (lost) throw lost; // heartbeat saw us superseded → terminal stand-down (don't keep billing)
     } finally {
+      if (beat) clearInterval(beat);
       await this.close(); // always release the lock — even on the terminal lock-loss throw above
     }
   }

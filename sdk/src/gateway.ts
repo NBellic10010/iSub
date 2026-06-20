@@ -12,13 +12,14 @@
 // Server-only (node:http + node:sqlite) — import `@isub/sdk/gateway`.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Db } from './db';
-import { merchantByApiKey, sqlBillerStore } from './sql-store';
+import { merchantByApiKey, sqlBillerStore, usageByMandate, chargesByMandate } from './sql-store';
 import { IsubService, type ServicePolicy, type UseResult } from './service';
 import type { BillerChain, BillerEvent } from './biller';
 import type { IsubSigner } from './signer';
 import { WebhookDispatcher, eventToWebhook } from './webhook';
 import { IsubHttpError } from './errors';
 import type { RateCard } from './pricing';
+import type { IsubIndex } from './relations';
 
 export interface MerchantRouting {
   /** Where this merchant's charges are paid — must equal `mandate.merchant` on accepted mandates. */
@@ -37,6 +38,19 @@ export interface GatewayOptions {
   policy: ServicePolicy;
   /** Resolve a tenant's payout + webhook config (operator-provided; e.g. from its own config/DB). */
   routing: (merchantId: string) => MerchantRouting | null;
+  /**
+   * Optional relationship index. When provided, the gateway serves the dashboard read API
+   * (merchant→plans, subscriber→mandates, plan→mandates, owner→accounts) + write-time ingest
+   * routes. Omit it and those routes 404 — billing is unaffected (the index is a read projection).
+   */
+  index?: IsubIndex;
+  /**
+   * Allowed browser origin for CORS (the wallet/subscriber dashboards call the public `/relations/*`
+   * reads directly from the browser). Defaults to `*` for local dev / connect-test; in production set
+   * this to your dashboard origin (e.g. `process.env.ISUB_CORS_ORIGIN`). CORS is a browser-only concern
+   * — server-to-server callers (the thin client on a backend, curl) ignore it entirely.
+   */
+  corsOrigin?: string;
 }
 
 export class IsubGateway {
@@ -72,6 +86,14 @@ export class IsubGateway {
     return mid;
   }
 
+  /** api-key → the authenticated merchant's on-chain address (its `payoutAddress`). */
+  private merchantAddr(apiKey: string | undefined): string {
+    const mid = this.auth(apiKey);
+    const r = this.o.routing(mid);
+    if (!r) throw new IsubHttpError(404, `no routing configured for merchant ${mid}`);
+    return r.payoutAddress;
+  }
+
   // ===== in-process API (the thin client lands here; also handy for embedding/tests) =====
 
   /** Report a metered call against the agent's mandate (caller pre-priced the `amount`). */
@@ -104,6 +126,18 @@ export class IsubGateway {
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // CORS: the browser dashboards call this cross-origin. Reads + the `/relations/*` ingest are
+    // public (they only re-derive public on-chain data); api-key routes still require the key, now
+    // just with CORS headers present so the preflight passes. Tighten the origin allow-list in prod.
+    res.setHeader('access-control-allow-origin', this.o.corsOrigin ?? '*');
+    res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
+    res.setHeader('access-control-allow-headers', 'content-type, x-isub-api-key, x-isub-mandate');
+    res.setHeader('access-control-max-age', '86400');
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
     try {
       const url = req.url ?? '';
       if (req.method === 'GET' && url === '/health') return json(res, 200, { ok: true });
@@ -137,6 +171,80 @@ export class IsubGateway {
         return json(res, s ? 200 : 404, s ?? { reason: 'unknown mandate' });
       }
 
+      // ===== relationship index (dashboard read API) — only when an index is wired =====
+      const index = this.o.index;
+      if (index) {
+        const { pathname, query } = parseUrl(url);
+
+        // write-time ingest (api-key gated; re-derives the row from chain, so it's safe).
+        if (req.method === 'POST' && pathname === '/index/plan') {
+          this.auth(apiKey);
+          const { planId } = JSON.parse((await readBody(req)) || '{}') as { planId?: string };
+          if (!planId) return json(res, 400, { ok: false, reason: 'body needs { planId }' });
+          return jsonBig(res, 200, await index.ingestPlan(planId));
+        }
+        if (req.method === 'POST' && pathname === '/index/mandate') {
+          this.auth(apiKey);
+          const { mandateId } = JSON.parse((await readBody(req)) || '{}') as { mandateId?: string };
+          if (!mandateId) return json(res, 400, { ok: false, reason: 'body needs { mandateId }' });
+          return jsonBig(res, 200, await index.ingestMandate(mandateId));
+        }
+
+        // PUBLIC ingest (no api-key) — for wallet-based dashboards/checkout with no api-key. Safe:
+        // each re-derives the row from a chain point-read, so it only ever indexes public on-chain
+        // objects (a bad/garbage id just errors). Idempotent upsert by id.
+        if (req.method === 'POST' && pathname === '/relations/plan') {
+          const { planId } = JSON.parse((await readBody(req)) || '{}') as { planId?: string };
+          if (!planId) return json(res, 400, { ok: false, reason: 'body needs { planId }' });
+          return jsonBig(res, 200, await index.ingestPlan(planId));
+        }
+        if (req.method === 'POST' && pathname === '/relations/mandate') {
+          const { mandateId } = JSON.parse((await readBody(req)) || '{}') as { mandateId?: string };
+          if (!mandateId) return json(res, 400, { ok: false, reason: 'body needs { mandateId }' });
+          return jsonBig(res, 200, await index.ingestMandate(mandateId));
+        }
+        if (req.method === 'POST' && pathname === '/relations/account') {
+          const { accountId } = JSON.parse((await readBody(req)) || '{}') as { accountId?: string };
+          if (!accountId) return json(res, 400, { ok: false, reason: 'body needs { accountId }' });
+          return jsonBig(res, 200, await index.ingestAccount(accountId));
+        }
+
+        // merchant dashboard (api-key → the merchant's own on-chain address). "My plans / my subscribers."
+        if (req.method === 'GET' && pathname === '/plans') {
+          return jsonBig(res, 200, index.plansByMerchant(this.merchantAddr(apiKey)));
+        }
+        if (req.method === 'GET' && pathname === '/mandates') {
+          return jsonBig(res, 200, index.mandatesByMerchant(this.merchantAddr(apiKey)));
+        }
+
+        // public relationship reads (mandates/plans/accounts are public shared objects on-chain;
+        // the index only makes them queryable). Address-keyed — for the wallet-based subscriber portal.
+        if (req.method === 'GET' && pathname === '/relations/mandates') {
+          if (query.plan) return jsonBig(res, 200, index.mandatesByPlan(query.plan));
+          if (query.subscriber) return jsonBig(res, 200, index.mandatesBySubscriber(query.subscriber));
+          if (query.merchant) return jsonBig(res, 200, index.mandatesByMerchant(query.merchant));
+          return json(res, 400, { reason: 'need one of ?plan= | ?subscriber= | ?merchant=' });
+        }
+        if (req.method === 'GET' && pathname === '/relations/plans') {
+          if (!query.merchant) return json(res, 400, { reason: 'need ?merchant=' });
+          return jsonBig(res, 200, index.plansByMerchant(query.merchant));
+        }
+        if (req.method === 'GET' && pathname === '/relations/accounts') {
+          if (!query.owner) return json(res, 400, { reason: 'need ?owner=' });
+          return jsonBig(res, 200, index.accountsByOwner(query.owner));
+        }
+
+        // per-mandate time-series for the usage chart (public, by mandate id; on-chain-public data).
+        if (req.method === 'GET' && pathname === '/usage') {
+          if (!query.mandateId) return json(res, 400, { reason: 'need ?mandateId=' });
+          return jsonBig(res, 200, usageByMandate(this.o.db, query.mandateId));
+        }
+        if (req.method === 'GET' && pathname === '/charges') {
+          if (!query.mandateId) return json(res, 400, { reason: 'need ?mandateId=' });
+          return jsonBig(res, 200, chargesByMandate(this.o.db, query.mandateId));
+        }
+      }
+
       return json(res, 404, { reason: 'not found' });
     } catch (e) {
       if (e instanceof IsubHttpError) return json(res, e.status, { ok: false, reason: e.message });
@@ -166,4 +274,17 @@ function json(res: ServerResponse, status: number, obj: unknown): void {
   res.statusCode = status;
   res.setHeader('content-type', 'application/json');
   res.end(JSON.stringify(obj));
+}
+/** Like `json`, but encodes bigint fields (the index rows) as decimal strings — JSON has no bigint. */
+function jsonBig(res: ServerResponse, status: number, obj: unknown): void {
+  res.statusCode = status;
+  res.setHeader('content-type', 'application/json');
+  res.end(JSON.stringify(obj, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)));
+}
+/** Split a request URL into its pathname and a flat query map (no external deps). */
+function parseUrl(url: string): { pathname: string; query: Record<string, string> } {
+  const u = new URL(url, 'http://localhost');
+  const query: Record<string, string> = {};
+  for (const [k, v] of u.searchParams) query[k] = v;
+  return { pathname: u.pathname, query };
 }

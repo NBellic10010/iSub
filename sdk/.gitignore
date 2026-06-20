@@ -13,3 +13,8 @@ isub.localnet.json
 
 # captured test/run logs (regenerable; reference ephemeral localnet package ids)
 logs/
+
+# seeded relationship-index sqlite (regenerable via scripts/chart-seed.ts, mock-seed.ts, gateway-serve)
+isub-index.*.db
+isub-index.*.db-shm
+isub-index.*.db-wal

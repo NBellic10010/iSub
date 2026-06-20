@@ -5,6 +5,7 @@ import { ChargeMode, errorName, abortCodeOf, type PlanState } from '@isub/sdk';
 import { useIsub } from '@/lib/use-isub';
 import { fmtSui, toMist, shortId, DAY_MS } from '@/lib/format';
 import { Button, Badge, AddressChip } from '@/components/ui';
+import { webGateway } from '@/lib/gateway';
 
 // Opts the embedding merchant passes (via URL query). The merchant supplies only the planId +
 // budget; the REAL terms are read from chain here and shown to the user — the merchant cannot
@@ -41,6 +42,8 @@ function post(origin: string, msg: Record<string, unknown>): void {
     /* standalone (not embedded) — ignore */
   }
 }
+
+const gw = webGateway();
 
 export default function Checkout() {
   const { isub, signer, signMessage, address, connected, network } = useIsub();
@@ -118,6 +121,7 @@ export default function Checkout() {
           maxPerCharge: params.maxPerCharge ? toMist(params.maxPerCharge) : plan.rateCap,
         }));
       }
+      try { await gw.ingestMandate(mandateId); } catch { /* gateway down — subscriber can still track it manually */ }
       setBusy(null);
       setDone({ mandateId, accountId: acct });
       post(params.origin, { type: 'isub:result', ok: true, mandateId, accountId: acct });

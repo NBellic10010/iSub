@@ -6,9 +6,12 @@ import { MandateStatus, ChargeMode, errorName, abortCodeOf, accountExposure, typ
 import { useIsub } from '@/lib/use-isub';
 import { fmtSui, toMist, shortId } from '@/lib/format';
 import { Card, Metric, Badge, Button, AddressChip } from '@/components/ui';
+import { webGateway } from '@/lib/gateway';
+import { UsageChart } from '@/components/usage-chart';
 
 type Sub = { id: string; mandate: MandateState | null };
 type Exposure = Awaited<ReturnType<typeof accountExposure>>;
+const gw = webGateway();
 
 function statusBadge(s: MandateStatus) {
   if (s === MandateStatus.Active) return <Badge kind="accent">Active</Badge>;
@@ -22,6 +25,7 @@ export default function SubscriberDashboard() {
 
   const [accountId, setAccountId] = useState<string | null>(null);
   const [balance, setBalance] = useState<bigint | null>(null);
+  const [walletBalance, setWalletBalance] = useState<bigint | null>(null);
   const [subs, setSubs] = useState<Sub[]>([]);
   const [exposure, setExposure] = useState<Exposure | null>(null);
   const [depositSui, setDepositSui] = useState('0.1');
@@ -29,6 +33,7 @@ export default function SubscriberDashboard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [chartFor, setChartFor] = useState<string | null>(null);
 
   const refreshAccount = useCallback(
     async (id: string) => {
@@ -41,9 +46,38 @@ export default function SubscriberDashboard() {
     [isub],
   );
 
+  // The connected wallet's OWN native SUI (gas + what's available to deposit) — distinct from the
+  // iSub Account balance. Same call the SDK's `suiBalance` helper uses.
+  const refreshWallet = useCallback(async () => {
+    if (!address) return setWalletBalance(null);
+    try {
+      setWalletBalance(BigInt((await isub.client.getBalance({ owner: address })).balance.balance));
+    } catch {
+      setWalletBalance(null);
+    }
+  }, [isub, address]);
+
   const refreshSubs = useCallback(
     async (id: string | null, ids: string[]) => {
-      const rows = ids.length ? await isub.getMandatesResolved(ids) : [];
+      let rows: Sub[] = [];
+      if (ids.length) {
+        try {
+          rows = await isub.getMandatesResolved(ids);
+        } catch {
+          // Batched getObjects can fail at the gRPC-web transport layer in some browsers; fall back to
+          // per-id singular reads (the proven path — the same getObject getAccount uses), isolating
+          // failures so one unreadable id (e.g. wrong network) shows as `unreadable`, not a blank list.
+          rows = await Promise.all(
+            ids.map(async (mid): Promise<Sub> => {
+              try {
+                return { id: mid, mandate: await isub.getMandate(mid) };
+              } catch {
+                return { id: mid, mandate: null };
+              }
+            }),
+          );
+        }
+      }
       setSubs(rows);
       if (id) {
         try {
@@ -56,22 +90,52 @@ export default function SubscriberDashboard() {
     [isub],
   );
 
-  useEffect(() => {
-    setError(null);
-    setInfo(null);
+  // Discover the user's account + mandates cross-device from the gateway index (by wallet address),
+  // merged with locally-remembered ids. Gateway down → localStorage only (still works on this device).
+  const load = useCallback(async () => {
     if (!address) {
       setAccountId(null);
       setBalance(null);
+      setWalletBalance(null);
       setSubs([]);
       setExposure(null);
       return;
     }
-    const acc = localStorage.getItem(`${ns}:account`);
-    const ids = JSON.parse(localStorage.getItem(`${ns}:mandates`) ?? '[]') as string[];
+    let acc = localStorage.getItem(`${ns}:account`);
+    const ids = new Set(JSON.parse(localStorage.getItem(`${ns}:mandates`) ?? '[]') as string[]);
+    try {
+      const [accs, mans] = await Promise.all([gw.accountsByOwner(address), gw.mandatesBySubscriber(address)]);
+      // Only ADOPT a gateway-discovered account the chain can actually confirm — skip rows the chain
+      // can't read (mock / deleted / not-yet-finalized), so an unreadable index row never breaks the
+      // balance or leaves deposit/withdraw pointing at a non-existent account.
+      if (!acc) {
+        for (const a of accs) {
+          try {
+            await isub.getAccount(a.accountId);
+            acc = a.accountId;
+            break;
+          } catch {
+            /* not a live account — skip */
+          }
+        }
+      }
+      for (const m of mans) ids.add(m.mandateId);
+      if (acc) localStorage.setItem(`${ns}:account`, acc);
+      localStorage.setItem(`${ns}:mandates`, JSON.stringify([...ids]));
+    } catch {
+      /* gateway unavailable → fall back to locally-remembered ids */
+    }
     setAccountId(acc);
+    void refreshWallet();
     if (acc) void refreshAccount(acc);
-    void refreshSubs(acc, ids);
-  }, [address, ns, refreshAccount, refreshSubs]);
+    void refreshSubs(acc, [...ids]);
+  }, [address, ns, isub, refreshAccount, refreshSubs, refreshWallet]);
+
+  useEffect(() => {
+    setError(null);
+    setInfo(null);
+    void load();
+  }, [load]);
 
   function mandateIds(): string[] {
     return JSON.parse(localStorage.getItem(`${ns}:mandates`) ?? '[]') as string[];
@@ -97,7 +161,9 @@ export default function SubscriberDashboard() {
       const { accountId: id } = await isub.openAccount(signer!);
       localStorage.setItem(`${ns}:account`, id);
       setAccountId(id);
+      try { await gw.ingestAccount(id); } catch { /* gateway down — discoverable later */ }
       await refreshAccount(id);
+      await refreshWallet();
       return `Account opened — ${shortId(id)}`;
     });
 
@@ -106,6 +172,7 @@ export default function SubscriberDashboard() {
       const amount = toMist(depositSui);
       await isub.deposit(signer!, { accountId: accountId!, amount });
       await refreshAccount(accountId!);
+      await refreshWallet();
       return `Deposited ${fmtSui(amount)} SUI`;
     });
 
@@ -113,6 +180,7 @@ export default function SubscriberDashboard() {
     run('Withdrawing…', async () => {
       await isub.withdrawAll(signer!, { accountId: accountId! });
       await refreshAccount(accountId!);
+      await refreshWallet();
       return 'Withdrew full balance back to your wallet';
     });
 
@@ -123,6 +191,7 @@ export default function SubscriberDashboard() {
       const ids = [...new Set([...mandateIds(), id])];
       localStorage.setItem(`${ns}:mandates`, JSON.stringify(ids));
       setTrackId('');
+      try { await gw.ingestMandate(id); } catch { /* gateway down — local only */ }
       await refreshSubs(accountId, ids);
       return `Now watching ${shortId(id)}`;
     });
@@ -168,12 +237,24 @@ export default function SubscriberDashboard() {
       ) : (
         <>
           <section className="card" style={{ marginBottom: 16 }}>
-            <h3 style={{ fontSize: 15, marginBottom: 12 }}>Your account</h3>
+            <h3 style={{ fontSize: 15, marginBottom: 12 }}>Your balances</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 14 }}>
+              <div className="metric">
+                <p className="label">Wallet</p>
+                <p className="value amount">{walletBalance == null ? '—' : `${fmtSui(walletBalance)} SUI`}</p>
+                <p className="label" style={{ margin: '6px 0 0' }}>your wallet’s own SUI — gas & deposits</p>
+              </div>
+              <div className="metric">
+                <p className="label">iSub account</p>
+                <p className="value amount">{accountId ? (balance == null ? '—' : `${fmtSui(balance)} SUI`) : 'not opened'}</p>
+                <p className="label" style={{ margin: '6px 0 0' }}>deposited — funds your subscriptions · withdraw anytime</p>
+              </div>
+            </div>
             {accountId ? (
               <>
-                <div className="row" style={{ justifyContent: 'space-between', marginBottom: 14 }}>
+                <div className="row" style={{ marginBottom: 12 }}>
+                  <span className="muted" style={{ fontSize: 12 }}>account</span>
                   <AddressChip id={accountId} />
-                  <span className="amount" style={{ fontSize: 22, fontWeight: 500 }}>{balance == null ? '—' : `${fmtSui(balance)} SUI`}</span>
                 </div>
                 <div className="row">
                   <input className="input" style={{ width: 120 }} value={depositSui} onChange={(e) => setDepositSui(e.target.value)} aria-label="deposit amount in SUI" />
@@ -185,7 +266,7 @@ export default function SubscriberDashboard() {
             ) : (
               <>
                 <p className="muted" style={{ fontSize: 14, marginBottom: 12 }}>
-                  Open a reusable balance you control. Withdraw anytime — no pre-funding lock-in.
+                  Open a reusable iSub balance you control — deposit from your wallet, withdraw anytime, no pre-funding lock-in.
                 </p>
                 <Button onClick={doOpen} disabled={!!busy} variant="primary">Open account</Button>
               </>
@@ -215,7 +296,12 @@ export default function SubscriberDashboard() {
               <div key={id} style={{ borderTop: '0.5px solid var(--border)', padding: '12px 0' }}>
                 <div className="row" style={{ justifyContent: 'space-between' }}>
                   <AddressChip id={id} />
-                  {m ? statusBadge(m.status) : <Badge kind="neutral">unreadable</Badge>}
+                  <div className="row" style={{ gap: 8 }}>
+                    {m ? statusBadge(m.status) : <Badge kind="neutral">unreadable</Badge>}
+                    <button className="btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setChartFor(chartFor === id ? null : id)}>
+                      {chartFor === id ? 'Hide usage' : 'Usage'}
+                    </button>
+                  </div>
                 </div>
                 {m && (
                   <>
@@ -238,6 +324,7 @@ export default function SubscriberDashboard() {
                     )}
                   </>
                 )}
+                {chartFor === id && <UsageChart mandateId={id} />}
               </div>
             ))}
           </section>

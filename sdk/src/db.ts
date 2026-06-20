@@ -114,6 +114,55 @@ CREATE TABLE IF NOT EXISTS schedules (
   created_at           INTEGER NOT NULL,
   PRIMARY KEY (merchant_id, subscription_id)
 );
+
+-- ===== Relationship index (idx_*) — the off-chain projection that powers dashboard queries =====
+-- gRPC has no event query and cannot enumerate shared objects by owner, so the on-chain
+-- relationships (merchant→plans, subscriber→mandates, plan→mandates, owner→accounts) are
+-- unreadable from the chain alone. These tables make them queryable. Deliberately GLOBAL and
+-- address-keyed (NOT merchant_id-scoped): a subscriber's mandates span merchants. Rows are
+-- re-derived from chain point-reads at write time (IsubIndex), so they are chain-truth, never
+-- trusted from the caller. READ-ONLY projection: NOT in the billing hot path — the keeper/biller
+-- never read these (the "no event query on the hot path" invariant is preserved). Kept separate
+-- from the keeper's operational subscriptions table on purpose (no shared source of truth).
+-- Bigints are TEXT decimal strings (like usage_records.amount), for the Postgres port.
+CREATE TABLE IF NOT EXISTS idx_plans (
+  plan_id        TEXT PRIMARY KEY,
+  merchant       TEXT NOT NULL,
+  mode           INTEGER,
+  price          TEXT,
+  interval_ms    TEXT,
+  rate_cap       TEXT,
+  rate_window_ms TEXT,
+  keeper         TEXT,
+  active         INTEGER,
+  updated_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plans_merchant ON idx_plans (merchant);
+
+CREATE TABLE IF NOT EXISTS idx_mandates (
+  mandate_id   TEXT PRIMARY KEY,
+  account_id   TEXT,
+  subscriber   TEXT NOT NULL,
+  merchant     TEXT NOT NULL,
+  plan_id      TEXT,
+  mode         INTEGER,
+  status       INTEGER,
+  spent_total  TEXT,
+  total_budget TEXT,
+  expiry_ms    TEXT,
+  charge_seq   TEXT,
+  updated_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mandates_subscriber ON idx_mandates (subscriber);
+CREATE INDEX IF NOT EXISTS idx_mandates_merchant   ON idx_mandates (merchant);
+CREATE INDEX IF NOT EXISTS idx_mandates_plan       ON idx_mandates (plan_id);
+
+CREATE TABLE IF NOT EXISTS idx_accounts (
+  account_id TEXT PRIMARY KEY,
+  owner      TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_accounts_owner ON idx_accounts (owner);
 `;
 
 /**

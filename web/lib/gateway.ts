@@ -1,85 +1,105 @@
-// ===== INTERFACE POINT: the iSub managed gateway (off-chain merchant data) =====
+// ===== The iSub managed gateway client (off-chain relationship index + usage) =====
 //
-// The subscriber app is ON-CHAIN ONLY (it goes through @isub/sdk + the wallet — see use-isub.ts).
-// The MERCHANT dashboard needs off-chain data the gateway owns (api keys, usage, webhooks,
-// invoices, lag). This is the typed seam to it. Methods marked EXISTS are already served by
-// `@isub/sdk/gateway` (IsubGateway HTTP front); methods marked TODO are to be added there
-// (the dashboard read API) — they throw until then, so the UI can be built against the contract.
+// The on-chain reads go through @isub/sdk + the wallet (use-isub.ts). This is the seam to the
+// gateway's OFF-CHAIN relationship index — the part gRPC can't serve (merchant→plans,
+// subscriber→mandates across merchants, owner→accounts). It mirrors @isub/sdk/gateway's HTTP routes.
 //
-// Reuse: this maps 1:1 onto the gateway's existing HTTP routes; merchant auth is the api-key
-// header the gateway already checks (later upgraded to a SIWS session — see lib/auth seam).
+// The wallet-based dashboards use the PUBLIC, address-keyed routes (no api-key — these are public
+// on-chain objects, just made queryable) + public write-time ingest. The api-key routes
+// (`listPlans`/`listMandates`) remain for the managed thin-client path. All u64s cross the wire as
+// decimal STRINGS (JSON has no bigint).
 
 export interface UseResult {
   ok: boolean;
   status: number;
   reason?: string;
 }
+export interface PlanRowJson {
+  planId: string; merchant: string; mode: number;
+  price: string; intervalMs: string; rateCap: string; rateWindowMs: string;
+  keeper: string; active: boolean; updatedAt: number;
+}
+export interface MandateRowJson {
+  mandateId: string; accountId: string; subscriber: string; merchant: string; planId: string;
+  mode: number; status: number; spentTotal: string; totalBudget: string; expiryMs: string;
+  chargeSeq: string; updatedAt: number;
+}
+export interface AccountRowJson {
+  accountId: string; owner: string; updatedAt: number;
+}
+export interface UsagePointJson {
+  usageId: string; mandateId: string; amount: string; atMs: number;
+  meterKey: string | null; qty: string | null; rateCardVersion: number | null; billed: boolean;
+}
+export interface ChargePointJson {
+  mandateId: string; kind: string; amount: string | null; seq: number | null; digest: string | null; atMs: number;
+}
 
 export interface GatewayClient {
-  // ---- EXISTS in @isub/sdk/gateway today ----
-  health(): Promise<{ ok: boolean }>; // GET /health
-  subscriptionStatus(mandateId: string): Promise<{ serviceable: boolean; remaining: string; reason?: string } | null>; // GET /subscriptions/:id
-  reportUsage(mandateId: string, amount: bigint, usageId: string): Promise<UseResult>; // POST /usage
-  reportMeteredUsage(mandateId: string, items: { meterKey: string; qty: bigint }[], usageId: string): Promise<UseResult>; // POST /usage-metered
-
-  // ---- TODO: merchant dashboard read API (extend gateway.ts) ----
-  /** List the merchant's plans. */
-  listPlans?(): Promise<unknown[]>;
-  /** Mandates against the merchant's plans (subscribers). */
-  listMandates?(): Promise<unknown[]>;
-  /** Usage records (priced line items) for a mandate. */
-  usage?(mandateId: string): Promise<unknown[]>;
-  /** Settlement invoices for a mandate/period. */
-  invoices?(mandateId: string): Promise<unknown[]>;
-  /** Schedule-lag / 漏收入 report across the merchant's mandates. */
-  scheduleLag?(): Promise<unknown>;
+  health(): Promise<{ ok: boolean }>;
+  // ---- public, address-keyed relationship reads (no api-key) ----
+  plansByMerchant(merchant: string): Promise<PlanRowJson[]>;
+  mandatesBySubscriber(subscriber: string): Promise<MandateRowJson[]>;
+  mandatesByPlan(planId: string): Promise<MandateRowJson[]>;
+  accountsByOwner(owner: string): Promise<AccountRowJson[]>;
+  // ---- per-mandate usage chart (public, by mandate id) ----
+  usage(mandateId: string): Promise<UsagePointJson[]>;
+  charges(mandateId: string): Promise<ChargePointJson[]>;
+  // ---- public write-time ingest (re-derives the row from chain) ----
+  ingestPlan(planId: string): Promise<PlanRowJson>;
+  ingestMandate(mandateId: string): Promise<MandateRowJson>;
+  ingestAccount(accountId: string): Promise<AccountRowJson>;
+  // ---- api-key scoped (managed thin-client path) ----
+  listPlans?(): Promise<PlanRowJson[]>;
+  listMandates?(): Promise<MandateRowJson[]>;
 }
 
 export interface GatewayConfig {
   baseUrl: string;
-  /** Merchant api-key (today) → a SIWS session token (later). */
+  /** Merchant api-key (managed path only). The wallet dashboards don't need it — they use the public routes. */
   apiKey?: string;
 }
 
-/** Build a gateway client. EXISTS routes are wired; TODO routes throw a clear "not implemented yet". */
+/** Gateway base URL — `NEXT_PUBLIC_GATEWAY_URL` at build, else a local dev default. */
+export const GATEWAY_URL =
+  (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_GATEWAY_URL) || 'http://localhost:4000';
+
+/** The default gateway client the dashboards use (public routes, no api-key). */
+export function webGateway(): GatewayClient {
+  return gatewayClient({ baseUrl: GATEWAY_URL });
+}
+
 export function gatewayClient(cfg: GatewayConfig): GatewayClient {
+  const base = cfg.baseUrl.replace(/\/$/, '');
   const headers = (extra: Record<string, string> = {}): Record<string, string> => ({
     'content-type': 'application/json',
     ...(cfg.apiKey ? { 'x-isub-api-key': cfg.apiKey } : {}),
     ...extra,
   });
-  const todo = (name: string) => (): never => {
-    throw new Error(`gateway.${name}() not implemented yet — add the read route to @isub/sdk/gateway`);
+  const getJson = async <T>(path: string): Promise<T> => {
+    const r = await fetch(`${base}${path}`, { headers: headers() });
+    if (!r.ok) throw new Error(`GET ${path} → ${r.status}`);
+    return (await r.json()) as T;
+  };
+  const postJson = async <T>(path: string, body: unknown): Promise<T> => {
+    const r = await fetch(`${base}${path}`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+    if (!r.ok) throw new Error(`POST ${path} → ${r.status}`);
+    return (await r.json()) as T;
   };
   return {
     async health() {
-      const r = await fetch(`${cfg.baseUrl}/health`);
-      return (await r.json()) as { ok: boolean };
+      return getJson<{ ok: boolean }>('/health');
     },
-    async subscriptionStatus(mandateId) {
-      const r = await fetch(`${cfg.baseUrl}/subscriptions/${mandateId}`, { headers: headers() });
-      return r.status === 404 ? null : ((await r.json()) as { serviceable: boolean; remaining: string; reason?: string });
-    },
-    async reportUsage(mandateId, amount, usageId) {
-      const r = await fetch(`${cfg.baseUrl}/usage`, {
-        method: 'POST',
-        headers: headers({ 'x-isub-mandate': mandateId }),
-        body: JSON.stringify({ amount: amount.toString(), usageId }),
-      });
-      return (await r.json()) as UseResult;
-    },
-    async reportMeteredUsage(mandateId, items, usageId) {
-      const r = await fetch(`${cfg.baseUrl}/usage-metered`, {
-        method: 'POST',
-        headers: headers({ 'x-isub-mandate': mandateId }),
-        body: JSON.stringify({ items: items.map((i) => ({ meterKey: i.meterKey, qty: i.qty.toString() })), usageId }),
-      });
-      return (await r.json()) as UseResult;
-    },
-    listPlans: todo('listPlans'),
-    listMandates: todo('listMandates'),
-    usage: todo('usage'),
-    invoices: todo('invoices'),
-    scheduleLag: todo('scheduleLag'),
+    plansByMerchant: (merchant) => getJson<PlanRowJson[]>(`/relations/plans?merchant=${encodeURIComponent(merchant)}`),
+    mandatesBySubscriber: (subscriber) => getJson<MandateRowJson[]>(`/relations/mandates?subscriber=${encodeURIComponent(subscriber)}`),
+    mandatesByPlan: (planId) => getJson<MandateRowJson[]>(`/relations/mandates?plan=${encodeURIComponent(planId)}`),
+    accountsByOwner: (owner) => getJson<AccountRowJson[]>(`/relations/accounts?owner=${encodeURIComponent(owner)}`),
+    usage: (mandateId) => getJson<UsagePointJson[]>(`/usage?mandateId=${encodeURIComponent(mandateId)}`),
+    charges: (mandateId) => getJson<ChargePointJson[]>(`/charges?mandateId=${encodeURIComponent(mandateId)}`),
+    ingestPlan: (planId) => postJson<PlanRowJson>('/relations/plan', { planId }),
+    ingestMandate: (mandateId) => postJson<MandateRowJson>('/relations/mandate', { mandateId }),
+    ingestAccount: (accountId) => postJson<AccountRowJson>('/relations/account', { accountId }),
+    listPlans: () => getJson<PlanRowJson[]>('/plans'),
+    listMandates: () => getJson<MandateRowJson[]>('/mandates'),
   };
 }

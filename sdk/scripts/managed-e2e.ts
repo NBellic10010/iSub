@@ -116,7 +116,11 @@ async function main(): Promise<void> {
 
   console.log('• gateway 后台结算(iSub keeper 签)→ 真链扣款');
   const merchBefore = await suiBalance(client, merchant.address);
-  await gateway.flush(API_KEY, mandateId);
+  const mB = await isub.getMandate(mandateId);
+  const acctB = await isub.getAccount(accountId);
+  console.log('  [diag] mandate caps:', JSON.stringify({ totalBudget: mB.totalBudget, spentTotal: mB.spentTotal, maxPerCharge: mB.maxPerCharge, rateCap: mB.rateCap, rateWindowMs: mB.rateWindowMs, windowStartMs: mB.windowStartMs, windowSpent: mB.windowSpent, expiryMs: mB.expiryMs, notBeforeMs: mB.notBeforeMs, status: mB.status, chargeSeq: mB.chargeSeq, mode: mB.mode, balance: acctB.balance, nowMs: Date.now(), USE: USE }, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)));
+  const fr = await gateway.flush(API_KEY, mandateId);
+  console.log('  [diag] flush result:', JSON.stringify(fr, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)));
   const m = await isub.getMandate(mandateId);
   eqBig(m.spentTotal, 3n * USE, 'on-chain spent = 3×use');
   eqBig((await isub.getAccount(accountId)).balance, DEPOSIT - 3n * USE, 'agent account debited 3×use');

@@ -6,10 +6,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileStore } from '../src/store-file';
 import { memoryStore } from '../src/store';
-import { IsubKeeper, ChargeMode, MandateStatus, scheduleLag, priceUsage, priceUsageMulti, assertValidRateCard, assertRateCardFits, buildConsent, verifyConsentSignature, IsubAbortError } from '../src/index';
+import { IsubKeeper, ChargeMode, MandateStatus, scheduleLag, priceUsage, priceUsageMulti, assertValidRateCard, assertRateCardFits, buildConsent, verifyConsentSignature, IsubAbortError, IsubError } from '../src/index';
 import type { IsubClient, IsubSigner, MandateState, RateCard, AuthorizeFixedArgs, AuthorizeMeteredArgs } from '../src/index';
 import { IsubAgent, type SpendPolicy } from '../src/agent';
-import { IsubBiller, memBillerStore, type BillerChain } from '../src/biller';
+import { IsubBiller, memBillerStore, type BillerChain, type BillerEvent } from '../src/biller';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 
 let passed = 0;
@@ -473,6 +473,72 @@ async function testBillerRunLifecycle(): Promise<void> {
   }
 }
 
+// ===== A2: flush isolates a per-mandate failure (one unreadable mandate ≠ whole-batch reject) =====
+const PAYGm = (id: string, chargeSeq: bigint): MandateState => ({
+  ...DUE_FIXED, id, mode: ChargeMode.Payg, accountId: id, chargeSeq,
+  maxPerCharge: 1_000_000n, totalBudget: 1_000_000n, rateCap: 1_000_000n, rateWindowMs: 10_000n, windowStartMs: 0n, windowSpent: 0n,
+});
+async function testFlushIsolation(): Promise<void> {
+  console.log('\n• flush fault isolation (A2: one unreadable mandate must not reject the whole batch)');
+  const store = memBillerStore();
+  await store.recordUsage({ usageId: 'g1', mandateId: '0xGOOD', amount: 10n, atMs: 1 });
+  await store.recordUsage({ usageId: 'b1', mandateId: '0xBAD', amount: 10n, atMs: 1 });
+  let chainSeq = 0n;
+  const chain = {
+    getMandate: async (id: string): Promise<MandateState> => {
+      if (id === '0xBAD') throw new IsubError('not_found', 'object 0xBAD not found'); // unreadable/closed mandate
+      return PAYGm('0xGOOD', chainSeq);
+    },
+    getAccount: async () => ({ id: '0xGOOD', owner: '0xu', balance: 1_000_000n }),
+    chargeMetered: async () => { chainSeq += 1n; return { digest: '0xok' }; },
+  } as unknown as BillerChain;
+  const events: BillerEvent[] = [];
+  const biller = new IsubBiller(chain, DUMMY_SIGNER, store, { onEvent: (e) => events.push(e) });
+  const results = await biller.flush(undefined, 1000); // no-arg → all mandates with unbilled
+  check(results.length === 2, 'flush returned a result per mandate (did NOT reject the whole batch)');
+  check(results.find((r) => r.mandateId === '0xGOOD')?.charged === 10n, 'the GOOD mandate still charged despite the bad one');
+  check(results.find((r) => r.mandateId === '0xBAD')?.charged === 0n, 'the unreadable mandate isolated to its own zero-charge result');
+  check(events.some((e) => e.type === 'charge.failed' && e.mandateId === '0xBAD'), 'unreadable mandate surfaced as charge.failed');
+  check((await store.unbilled('0xGOOD')).length === 0 && (await store.unbilled('0xBAD')).length === 1, 'good usage billed; bad usage left for retry');
+}
+
+// ===== A5: flush bounds concurrent settles (no RPC storm) =====
+async function testFlushConcurrency(): Promise<void> {
+  console.log('\n• flush concurrency cap (A5: bounded fan-out, no RPC storm)');
+  const store = memBillerStore();
+  for (let i = 0; i < 12; i++) await store.recordUsage({ usageId: `u${i}`, mandateId: `0xM${i}`, amount: 5n, atMs: i });
+  let inFlight = 0;
+  let peak = 0;
+  const chain = {
+    getMandate: async (id: string): Promise<MandateState> => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 5)); // hold so concurrent settles overlap
+      inFlight--;
+      return PAYGm(id, 0n);
+    },
+    getAccount: async (id: string) => ({ id, owner: '0xu', balance: 1_000_000n }),
+    chargeMetered: async () => ({ digest: '0xok' }),
+  } as unknown as BillerChain;
+  const biller = new IsubBiller(chain, DUMMY_SIGNER, store, { policy: { concurrency: 3 } });
+  await biller.flush(undefined, 1000);
+  check(peak <= 3 && peak > 1, `concurrent settles capped at 3 (peak observed ${peak})`);
+}
+
+// ===== B4: lock heartbeat fires on its own cadence, independent of pollMs =====
+async function testBillerHeartbeat(): Promise<void> {
+  console.log('\n• biller heartbeat (B4: renewLock fires independent of a long pollMs)');
+  let renews = 0;
+  const store = { ...memBillerStore(), acquireLock: async () => {}, renewLock: async () => { renews++; }, releaseLock: async () => {} };
+  const ac = new AbortController();
+  const biller = new IsubBiller({} as unknown as BillerChain, DUMMY_SIGNER, store, { policy: { leaseRenewMs: 25 } });
+  const p = biller.run({ pollMs: 60_000, signal: ac.signal });
+  await new Promise((r) => setTimeout(r, 130)); // ~5 heartbeats at 25ms, despite the 60s poll
+  ac.abort();
+  await p;
+  check(renews >= 3, `renewLock heartbeat fired independent of the 60s poll (got ${renews} in ~130ms)`);
+}
+
 async function main(): Promise<void> {
   testCoreIsomorphism();
   await testStore();
@@ -486,6 +552,9 @@ async function main(): Promise<void> {
   await testPricedIngest();
   await testRecoverOrphanSameSeq();
   await testBillerRunLifecycle();
+  await testFlushIsolation();
+  await testFlushConcurrency();
+  await testBillerHeartbeat();
   await testConsent();
   console.log(`\n${failed === 0 ? '✅' : '❌'} backend unit: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
