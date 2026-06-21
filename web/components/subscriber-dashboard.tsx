@@ -6,9 +6,11 @@ import { MandateStatus, ChargeMode, errorName, abortCodeOf, accountExposure, typ
 import { useIsub } from '@/lib/use-isub';
 import { fmtSui, toMist, shortId, DAY_MS } from '@/lib/format';
 import { Card, Metric, Badge, Button, AddressChip } from '@/components/ui';
+import { Logo } from '@/components/logo';
 import { webGateway } from '@/lib/gateway';
 import { UsageChart } from '@/components/usage-chart';
 import { WalletUsageTable } from '@/components/wallet-usage-table';
+import { X402AgentExport } from '@/components/x402-agent-export';
 
 type Sub = { id: string; mandate: MandateState | null };
 type Exposure = Awaited<ReturnType<typeof accountExposure>>;
@@ -21,7 +23,7 @@ function statusBadge(s: MandateStatus) {
 }
 
 export default function SubscriberDashboard() {
-  const { isub, signer, address, connected, network } = useIsub();
+  const { isub, signer, signMessage, address, connected, network } = useIsub();
   const ns = `isub:${network}:${address ?? '-'}`;
 
   const [accountId, setAccountId] = useState<string | null>(null);
@@ -280,7 +282,7 @@ export default function SubscriberDashboard() {
     <main className="shell">
       <h2 className="sr-only">iSub subscriber dashboard</h2>
       <header className="row" style={{ justifyContent: 'space-between', marginBottom: '1.75rem' }}>
-        <Link href="/" style={{ fontSize: 18, fontWeight: 500 }}>iSub</Link>
+        <Link href="/" aria-label="iSub home"><Logo size={18} /></Link>
         <div className="row" style={{ gap: 10 }}>
           <span className="muted" style={{ fontSize: 12 }}>{network}</span>
           <ConnectButton />
@@ -451,6 +453,9 @@ export default function SubscriberDashboard() {
                         <Button onClick={() => doResume(id)} disabled={!!busy}>Resume</Button>
                         <Button onClick={() => doRevoke(id)} disabled={!!busy}>Unsubscribe</Button>
                       </div>
+                    )}
+                    {m.mode === ChargeMode.Payg && m.status === MandateStatus.Active && (
+                      <X402AgentExport mandate={m} network={network} signMessage={signMessage} />
                     )}
                   </>
                 )}

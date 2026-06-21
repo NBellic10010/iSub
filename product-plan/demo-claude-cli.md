@@ -21,11 +21,48 @@ on-chain spent_total increased
 ```
 终端字号调大、清屏。
 
+> **`x402-testnet:setup` 的订阅者是项目 actor**(`subscriber` actor),不是你的浏览器钱包。它扣款会进 gateway 库、能在"Track a mandate"里看,但**不会出现在你自己钱包的面板聚合**(面板按你的钱包账户聚合)。要让花销显示在**你自己的面板**上,走下面的 §1b。
+
+## 1b. 让花销显示在你自己的面板上(浏览器钱包当订阅者)
+这条路把 mandate 的 `subscriber` 设成**你连接的浏览器钱包**,所以 agent 付的每一笔都落在你自己的账户 → **你的面板卡片 spent 上涨、图表出柱**。
+
+```bash
+cd ~/Desktop/iSub/sdk && npm run x402-plan:setup     # 商家+keeper actor 发一个 PAYG plan,打印 planId
+```
+然后在浏览器面板(`cd ~/Desktop/iSub/web && npm run dev`,用**你的钱包**连接):
+1. **Deposit** 一点余额到你的账户(keeper 要能从中扣款)。
+2. **"Subscribe to a plan"** → 粘 `planId` → **Review terms** → 设预算 → **Subscribe**(你的钱包签名,mandate.subscriber = 你)。
+3. 新出的 **PAYG 卡片** → **"Export x402 agent config"** → 钱包签 agent 绑定证书 → 复制 JSON → 存到 `sdk/scripts/.x402-testnet.json`。
+4. `cd ~/Desktop/iSub/sdk && npm run isub:claude:testnet` → Claude 付款 → **切回面板,你的卡片 spent 上涨 + 图表出柱**。
+
+> 原理:浏览器生成 agent 密钥,用你的钱包(=subscriber)签 `bindMessage` 绑定证书;CLI 用该 agent 私钥签每次调用的 PoP,keeper(plan 里指定的 keeper actor)拉款。agent 不持你的钱包密钥,只持自己的临时 agent 密钥。导出的 JSON 含 agent 私钥,已 gitignore,别提交。
+
 ## 2. 启动(一条命令)
 ```bash
 npm run isub:claude:testnet
 ```
 启动 Claude CLI,把 iSub MCP 接上(工具 `list_paid_apis` / `pay` / `budget_status`,已 `--allowedTools` 预授权),进程内自带真链 x402 seller(`/weather`=0.001、`/premium-quote`=0.005 SUI),后端是真 `IsubClient` + keeper 签名 + SQL biller(agentAuth=enforce)。
+
+## 2b. 三终端联动(Claude CLI 付款 ↔ 网页面板实时联动)— 升级版,最有冲击力
+x402 testnet biller 写进的是 gateway/面板读的**同一个** `isub-index.testnet.db`(并在启动时 `ingestMandate`)。所以每次 Claude 付款 → 扣款 journal 落进面板库 → **网页图表实时出柱**。三个终端:
+
+```bash
+# T1 — 读 API,起在 web 指向的 :4100,读同一个 index 库(只读,不结算)
+cd ~/Desktop/iSub/sdk && ISUB_NETWORK=testnet PORT=4100 npm run gateway:serve
+
+# T2 — Claude CLI 真链付款(每笔写进同一个库)
+cd ~/Desktop/iSub/sdk && npm run isub:claude:testnet
+
+# 浏览器 — 订阅者面板(testnet)
+cd ~/Desktop/iSub/web && npm run dev
+```
+面板里:**"Track a mandate id"** 粘当前 mandate(从 config 读:`cat sdk/scripts/.x402-testnet.json | grep mandateId`)→ 点该订阅的 **"Usage"**。
+
+演示动作:在 T2 让 Claude 付一笔("帮我查天气")→ 切到浏览器刷新 → **新柱出现 + 卡片 spent 上涨**。再付一笔 premium → 又一根柱。**左边 Claude 自然语言付款,右边面板实时长出计费柱 + suiscan 可验**。
+
+**两个 caveat(诚实)**:① 只有"接好库之后"的付款会进面板图表;`x402-testnet:setup`/早期跑出来的历史扣款若落在旧的 `.x402-testnet.db`,不回填(卡片仍按**链上**显示全额)。② 卡片 spent/budget 永远读链上;图表柱子读 index 库——所以图表只反映写进该库的那些笔。
+
+> **验证过**:一笔真链 `charge_metered`(digest `Dpi5Wqt…`)后,`isub-index.testnet.db` 里该 mandate 有 `charges`(含 charged + 真 digest)、`usage_records`、`idx_mandates` 各就位 → 面板 `/usage`、`/charges` 即返回。
 
 ## 3. 演示脚本(照着对 Claude 说)
 | 你说(自然语言) | Claude 做 | 观众看到 / 你点出的 beat |

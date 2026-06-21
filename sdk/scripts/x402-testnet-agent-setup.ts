@@ -11,6 +11,7 @@ import { IsubService } from '../src/service';
 import { openDb } from '../src/db';
 import { sqlBillerStore } from '../src/sql-store';
 import { MandateFacilitator, type X402Network } from '../src/x402';
+import { IsubIndex } from '../src/relations';
 import { buildAgentServer, type PaidApi, type AgentServer } from './x402-agent-core';
 import { clientFor, loadOrCreateActor, explorer } from './env';
 import type { AgentCert } from '../src/agent-auth';
@@ -51,10 +52,20 @@ export async function setupX402Testnet(): Promise<TestnetAgent> {
   const cert: AgentCert = { agent: cfg.cert.agent, notAfter: BigInt(cfg.cert.notAfter), ver: cfg.cert.ver, sig: cfg.cert.sig };
   const ex = explorer(cfg.network);
 
-  const db = openDb(join(here, '.x402-testnet.db'));
+  // Write into the SAME index db the gateway/dashboard reads (default isub-index.<network>.db, or
+  // ISUB_INDEX_DB) so each on-chain charge shows up on the web UsageChart — not an isolated db.
+  const db = openDb(process.env.ISUB_INDEX_DB ?? join(here, '..', `isub-index.${cfg.network}.db`));
   const service = new IsubService(isub, keeper, cfg.payoutAddress, sqlBillerStore(db, 'x402demo'), { windowMs: 3_600_000, agentAuth: 'enforce' });
   const facilitator = new MandateFacilitator(service, `sui-${cfg.network}` as X402Network);
   const log = (...a: unknown[]): void => console.error('[isub-x402-testnet]', ...a);
+
+  // Ingest the mandate/account into the index so the dashboard can resolve them too (chart reads the
+  // biller's charge journal in this same db; ingest also enables /relations discovery).
+  try {
+    const index = new IsubIndex(isub, db);
+    await index.ingestMandate(cfg.mandateId);
+    await index.ingestAccount(cfg.accountId);
+  } catch (e) { log('index ingest skipped:', e instanceof Error ? e.message : e); }
 
   const apis: PaidApi[] = cfg.apis.map((a) => ({
     path: a.path,
