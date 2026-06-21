@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Logo } from '@/components/logo';
 
 export default function Merchant() {
   const items = [
@@ -10,7 +11,7 @@ export default function Merchant() {
   return (
     <main className="shell">
       <header className="row" style={{ justifyContent: 'space-between', marginBottom: '1.75rem' }}>
-        <Link href="/" style={{ fontSize: 18, fontWeight: 500 }}>iSub</Link>
+        <Link href="/" aria-label="iSub home"><Logo size={18} /></Link>
         <span className="muted" style={{ fontSize: 13 }}>merchant</span>
       </header>
 

@@ -1,6 +1,6 @@
 # AI-agent payments (MCP)
 
-iSub is built for the agent economy: an autonomous agent can **subscribe and pay per call within a human-set policy**, and an LLM can drive it through the Model Context Protocol (MCP).
+iSub is built for the agent economy: an autonomous agent can **subscribe and pay per call within a human-set policy** — speaking **x402** on the wire and aligned with **AP2**'s mandate model — and an LLM can drive it through the Model Context Protocol (MCP).
 
 The shape: a human funds an `Account` and defines an allow-list of services with hard caps; the agent holds a budget-bounded session key that may `subscribe` and trigger charges **only within that policy**.
 
@@ -51,9 +51,33 @@ await server.connect(transport);
 
 The server advertises tools (list/call) for checking status, subscribing within policy, and metering usage — so an agent can transact autonomously while the human's caps and the on-chain mandate bound every action.
 
-## a402-style metered access
+## x402 & AP2
 
-For agent-to-agent / HTTP-402 flows, pair the [managed gateway](managed-gateway.md): the serving agent calls `backend.use(mandateId, amount, usageId)` and gets **200 served / 402 gated**. The paying agent's mandate is the budget; the gateway settles on-chain. This is the iSub analogue of a "pay-per-request" rail for machine clients.
+iSub ships its own **x402** implementation (`@isub/sdk/x402`, V2-wire-compatible) with a custom **`mandate` scheme**. x402's stock `exact` scheme signs a fresh on-chain transfer per call; iSub's `mandate` scheme instead pays from a **standing, capped, revocable on-chain Mandate**, settled through the idempotent biller — so a single HTTP 402 round-trip carries a **recurring / metered** charge, not a one-shot transfer.
+
+Three faces — own types, no external dependency, interoperable by shape:
+
+| Role | Call | Does |
+| --- | --- | --- |
+| Seller | `buildPaymentRequirements()` | emit the `402` challenge (scheme · network · payTo · asset · amount) |
+| Buyer | `createMandatePayment()` | build the `X-PAYMENT` payload — an agent-auth proof-of-possession, no fresh tx |
+| Facilitator | `MandateFacilitator.verify()` / `.settle()` | cheap off-chain verify, then the single on-chain `charge_metered` |
+
+```typescript
+import { buildPaymentRequirements, createMandatePayment, MandateFacilitator } from '@isub/sdk/x402';
+```
+
+**AP2 alignment.** Google's Agent Payments Protocol centers agentic commerce on signed **mandates with constraints**. iSub's `Mandate` *is* that object — a capped, revocable authorization — but enforced **on-chain**, not just attested. An AP2-style intent maps directly onto an iSub mandate, so the same authorization that backs a subscription backs an agent's x402 payments.
+
+Run it:
+
+```bash
+cd sdk
+npm run x402:smoke     # full 402 → X-PAYMENT (PoP) → settle round-trip
+npm run isub:claude    # an MCP server hosting x402-paywalled APIs an agent pays for via natural language
+```
+
+For the simpler managed path, the [gateway](managed-gateway.md)'s thin client returns **200 served / 402 gated** on `backend.use(...)`, settling on-chain behind the api-key.
 
 ## Why this is safe
 

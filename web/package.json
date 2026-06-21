@@ -13,6 +13,7 @@
     "@isub/sdk": "*",
     "@mysten/dapp-kit-react": "^2.1.2",
     "@mysten/sui": "^2.17.0",
+    "cobe": "^2.0.1",
     "next": "^16.2.9",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

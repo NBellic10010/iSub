@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="232" height="80" viewBox="0 0 116 40" fill="none">
+  <rect x="0" y="4" width="28" height="4" rx="2" fill="#ececf0"/>
+  <rect x="0" y="14" width="28" height="5" rx="2.5" fill="#2b7fff"/>
+  <rect x="0" y="23" width="19" height="5" rx="2.5" fill="#7b5cff"/>
+  <rect x="0" y="32" width="11" height="5" rx="2.5" fill="#ff6fae"/>
+  <text x="40" y="30" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="29" font-weight="500" letter-spacing="-0.5"><tspan fill="#5aa2ff">i</tspan><tspan fill="#ececf0">Sub</tspan></text>
+</svg>

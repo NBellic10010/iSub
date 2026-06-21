@@ -49,7 +49,7 @@ await isub.chargeMetered(keeper, { accountId, mandateId, amount: 10_000_000n, se
 | --- | --- |
 | A merchant selling subscriptions or metered APIs | [`createPlanFixed` / `createPlanPayg`](reference/isub-client.md), the [checkout widget](guides/checkout-widget.md), and the [biller](guides/billing-automation.md) |
 | A subscriber / wallet | [`openAccount` → `deposit` → `authorize*`](guides/subscriptions-fixed.md) |
-| Building an AI agent that pays per call | [`IsubAgent` + the MCP server](guides/ai-agents-mcp.md) |
+| Building an AI agent that pays per call | [`IsubAgent`, x402 (`mandate` scheme) + the MCP server](guides/ai-agents-mcp.md) — x402-native, AP2-aligned |
 | An operator who wants "integrate-and-go" without self-hosting a keeper | The [managed gateway](guides/managed-gateway.md) + the thin [`@isub/sdk/client`](reference/gateway-api.md) |
 
 ## How the pieces fit

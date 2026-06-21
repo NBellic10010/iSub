@@ -49,6 +49,7 @@ The package is split so you only pull in what you use:
 | `@isub/sdk/relations` | `IsubIndex` (off-chain relationship index) |
 | `@isub/sdk/client` | `IsubServiceClient`, `verifyWebhook` (thin client → gateway) |
 | `@isub/sdk/mcp` | `createIsubMcpServer` (Model Context Protocol server) |
+| `@isub/sdk/x402` | x402 (seller · buyer · facilitator), the `mandate` scheme — agent payments |
 | `@isub/sdk/sql-store` · `/db` · `/store-file` | persistence backends |
 | `@isub/sdk/webhook` · `/service` | webhook signing/verifying, single-tenant service |
 

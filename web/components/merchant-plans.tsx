@@ -6,6 +6,7 @@ import { ChargeMode, errorName, abortCodeOf, type PlanState } from '@isub/sdk';
 import { useIsub } from '@/lib/use-isub';
 import { fmtSui, toMist, shortId } from '@/lib/format';
 import { Card, Badge, Button, AddressChip } from '@/components/ui';
+import { Logo } from '@/components/logo';
 import { webGateway } from '@/lib/gateway';
 
 const INTERVALS = [
@@ -131,7 +132,7 @@ export default function MerchantPlans() {
       <h2 className="sr-only">iSub merchant — plans</h2>
       <header className="row" style={{ justifyContent: 'space-between', marginBottom: '1.5rem' }}>
         <div className="row" style={{ gap: 16 }}>
-          <Link href="/" style={{ fontSize: 18, fontWeight: 500 }}>iSub</Link>
+          <Link href="/" aria-label="iSub home"><Logo size={18} /></Link>
           <nav className="row" style={{ gap: 14, fontSize: 14 }}>
             <span style={{ fontWeight: 500 }}>Plans</span>
             <span className="muted">Subscribers</span>

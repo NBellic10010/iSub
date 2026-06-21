@@ -5,6 +5,7 @@ import { ChargeMode, errorName, abortCodeOf, type PlanState } from '@isub/sdk';
 import { useIsub } from '@/lib/use-isub';
 import { fmtSui, toMist, shortId, DAY_MS } from '@/lib/format';
 import { Button, Badge, AddressChip } from '@/components/ui';
+import { Logo } from '@/components/logo';
 import { webGateway } from '@/lib/gateway';
 
 // Opts the embedding merchant passes (via URL query). The merchant supplies only the planId +
@@ -139,7 +140,7 @@ export default function Checkout() {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
       <div className="card" style={{ width: '100%', maxWidth: 380 }}>
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-          <span style={{ fontWeight: 500 }}>iSub · authorize subscription</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><Logo size={15} /><span className="muted" style={{ fontSize: 12 }}>authorize</span></span>
           <span className="muted" style={{ fontSize: 11 }}>{network}</span>
         </div>
 
