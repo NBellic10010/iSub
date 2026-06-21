@@ -286,6 +286,21 @@ export function sqlBillerStore(db: Db, merchantId: string): BillerStore {
       }));
     },
 
+    // F5: durable agent-cert rollback floor, tenant-scoped. Survives restart + holds across instances,
+    // so `verifyProof` can reject a rotated-out / leaked older cert that the in-memory session never saw.
+    async getMaxCertVer(mandateId: string): Promise<number | undefined> {
+      const row = db
+        .prepare(`SELECT max_ver FROM agent_cert_vers WHERE merchant_id = ? AND mandate_id = ?`)
+        .get(merchantId, mandateId) as { max_ver: number } | undefined;
+      return row?.max_ver;
+    },
+    async recordCertVer(mandateId: string, ver: number): Promise<void> {
+      db.prepare(
+        `INSERT INTO agent_cert_vers (merchant_id, mandate_id, max_ver, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(merchant_id, mandate_id) DO UPDATE SET max_ver = MAX(max_ver, excluded.max_ver), updated_at = excluded.updated_at`,
+      ).run(merchantId, mandateId, ver, Date.now());
+    },
+
     ...makeLock(db, merchantId, 'biller'),
   };
 }

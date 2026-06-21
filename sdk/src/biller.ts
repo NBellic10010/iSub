@@ -75,6 +75,14 @@ export interface BillerStore {
   /** Refresh our heartbeat; throw if we've been superseded (so run() can stand down). */
   renewLock?(): Promise<void>;
   releaseLock?(): Promise<void>;
+  /**
+   * Durable agent-cert rollback floor (F5): the highest cert `ver` ever accepted for a mandate.
+   * `verifyProof` rejects a cert below this, so a leaked/rotated-out agent key can't be replayed
+   * even across a restart or a second service instance (the in-memory session alone can't survive
+   * those). Optional: a store omitting them degrades to per-process (single-instance) protection.
+   */
+  getMaxCertVer?(mandateId: string): Promise<number | undefined>;
+  recordCertVer?(mandateId: string, ver: number): Promise<void>;
 }
 
 /** The slice of `IsubClient` the biller needs — so a faithful mock can stand in for the chain. */
@@ -208,10 +216,14 @@ export class IsubBiller {
     }
   }
 
-  /** Idempotent ingest: dedups by usageId, accumulates off-chain. A retried report is a no-op. */
-  async recordUsage(u: { mandateId: string; amount: bigint; usageId: string; atMs?: number }): Promise<void> {
+  /**
+   * Idempotent ingest: dedups by usageId, accumulates off-chain. Returns true if newly recorded,
+   * false on a duplicate usageId — the caller (service) MUST refuse to re-serve on false, or a
+   * captured payload could be replayed for unlimited free re-serves (theft-of-service, F1).
+   */
+  async recordUsage(u: { mandateId: string; amount: bigint; usageId: string; atMs?: number }): Promise<boolean> {
     if (u.amount <= 0n) throw new IsubError('usage', 'usage amount must be positive');
-    await this.store.recordUsage({ usageId: u.usageId, mandateId: u.mandateId, amount: u.amount, atMs: u.atMs ?? Date.now() });
+    return this.store.recordUsage({ usageId: u.usageId, mandateId: u.mandateId, amount: u.amount, atMs: u.atMs ?? Date.now() });
   }
 
   /**
@@ -225,11 +237,11 @@ export class IsubBiller {
     usageId: string;
     items: ReadonlyArray<{ meterKey: string; qty: bigint }>;
     atMs?: number;
-  }): Promise<void> {
+  }): Promise<boolean> {
     if (!this.rateCard) throw new IsubError('config', 'no rate card configured on this biller');
     const { amount, lines, cardVersion } = priceUsageMulti(this.rateCard, u.items); // price once, freeze
     if (amount <= 0n) throw new IsubError('usage', 'priced amount must be positive'); // never store an un-billable phantom row
-    await this.store.recordUsage({
+    return this.store.recordUsage({
       usageId: u.usageId,
       mandateId: u.mandateId,
       amount,
@@ -505,12 +517,20 @@ export function memBillerStore(): BillerStore {
   const billed = new Set<string>();
   const seen = new Set<string>();
   const journal: JournalEntry[] = [];
+  const certVer = new Map<string, number>();
   return {
     async recordUsage(u) {
       if (seen.has(u.usageId)) return false;
       seen.add(u.usageId);
       usage.push(u);
       return true;
+    },
+    async getMaxCertVer(mandateId) {
+      return certVer.get(mandateId);
+    },
+    async recordCertVer(mandateId, ver) {
+      const cur = certVer.get(mandateId);
+      if (cur == null || ver > cur) certVer.set(mandateId, ver);
     },
     async unbilled(mandateId) {
       return usage.filter((u) => u.mandateId === mandateId && !billed.has(u.usageId)).sort((a, b) => a.atMs - b.atMs || a.usageId.localeCompare(b.usageId));

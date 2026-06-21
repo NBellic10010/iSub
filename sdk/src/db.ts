@@ -96,6 +96,17 @@ CREATE TABLE IF NOT EXISTS locks (
   PRIMARY KEY (merchant_id, name)
 );
 
+-- Durable agent-cert rollback floor (F5): highest cert ver accepted per (tenant, mandate). The
+-- service's verifyProof rejects a cert below max_ver, so a rotated-out / leaked older agent key
+-- can't be replayed across a restart or a second instance (the in-memory session can't span those).
+CREATE TABLE IF NOT EXISTS agent_cert_vers (
+  merchant_id TEXT NOT NULL,
+  mandate_id  TEXT NOT NULL,
+  max_ver     INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (merchant_id, mandate_id)
+);
+
 -- Scheduler (Architecture A) phase plans, per tenant. The phases column is an opaque JSON
 -- value object (bigints encoded as {"$b":"..."}); phase_cursor/status/refunded_through_seq
 -- drive tick(). phase_cursor (not cursor) dodges the Postgres reserved word for the port.

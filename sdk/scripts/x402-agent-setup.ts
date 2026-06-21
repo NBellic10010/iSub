@@ -69,7 +69,8 @@ export async function setupX402Demo(): Promise<MockAgent> {
   const signer: IsubSigner = { address: merchantAddr, signAndExecute: async () => ({ digest: '', success: true, abortCode: null, events: [], createdIds: [] }) };
   const service = new IsubService(chain, signer, merchantAddr, memBillerStore(), { windowMs: 3_600_000, agentAuth: 'enforce' });
   const facilitator = new MandateFacilitator(service, 'sui-localnet');
-  const cert = await issueAgentCert(subKp, { mandateId: MANDATE_ID, agent: agentKp.toSuiAddress(), notAfter: 0n, ver: 1 });
+  // F2: bounded cert lifetime (30d), never 0/forever — consistent with the testnet ceremony + web export.
+  const cert = await issueAgentCert(subKp, { mandateId: MANDATE_ID, agent: agentKp.toSuiAddress(), notAfter: BigInt(Date.now() + 30 * 24 * 60 * 60 * 1000), ver: 1 });
   const log = (...a: unknown[]): void => console.error('[isub-x402]', ...a);
 
   const srv = buildAgentServer({

@@ -67,7 +67,11 @@ async function main(): Promise<void> {
   const mandateId = sub.mandateId;
 
   console.log('• subscriber signs the agent-key binding cert (PoP authorization)');
-  const cert = await issueAgentCert(subKp, { mandateId, agent: agentKp.toSuiAddress(), notAfter: 0n, ver: 1 });
+  // F2: bound the cert — min(now+30d, mandate expiry) — so a leaked agent key self-expires (never 0/forever).
+  const md = await isub.getMandate(mandateId);
+  const certCap = BigInt(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const certNotAfter = md.expiryMs > 0n && md.expiryMs < certCap ? md.expiryMs : certCap;
+  const cert = await issueAgentCert(subKp, { mandateId, agent: agentKp.toSuiAddress(), notAfter: certNotAfter, ver: 1 });
 
   const cfg = {
     network: NETWORK,

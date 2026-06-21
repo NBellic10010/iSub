@@ -2,7 +2,9 @@
 // fix (Option a, `agent-auth.ts`). With `agentAuth: 'enforce'`:
 //   • a legit agent (subscriber-signed cert + per-call signature) is SERVED,
 //   • an ATTACKER who only knows the PUBLIC mandate id — no key, no signature — is REJECTED (403),
-//   • replayed / expired / wrong-payload signatures are REJECTED (403).
+//   • replayed-on-a-new-usageId / expired / wrong-payload signatures are REJECTED (403),
+//   • a VERBATIM replay (same usageId + sig, the exact-capture case) is REJECTED (409 single-use) —
+//     theft-of-SERVICE closed (F1): a captured payload can't be re-served even though funds are safe.
 // The attacker shares the merchant's runtime (so the binding is already cached) — proving the
 // per-call signature, not just the binding, is load-bearing.
 //
@@ -123,7 +125,8 @@ async function main(): Promise<void> {
   }
 
   console.log('• LEGIT agent — subscriber-signed cert + per-call signature');
-  const v1 = await victim.call('query_price_feed', await signed('victim-1')); // first call carries the cert
+  const v1args = await signed('victim-1'); // capture the EXACT payload the victim sends (verbatim-replay test below)
+  const v1 = await victim.call('query_price_feed', v1args); // first call carries the cert
   check(!v1.isError && v1.data.result?.pair === 'SUI/USDC', 'legit signed call SERVED (cert + per-call sig)');
   const v2 = await victim.call('query_price_feed', await signed('victim-2', { cert: false })); // cert cached now
   check(!v2.isError && v2.data.result, 'second signed call SERVED without re-sending cert (session-cached binding)');
@@ -132,9 +135,12 @@ async function main(): Promise<void> {
   const bearer = await attacker.call('query_price_feed', { mandateId: 'M1', pair: 'SUI/USDC', usageId: 'attacker-bearer' });
 
   console.log('\n• ATTACKER — replays the victim’s captured signature on a NEW usageId');
-  const v1args = await signed('victim-1');
   const replay = await attacker.call('query_price_feed', { ...v1args, usageId: 'attacker-replay' });
   check(replay.isError && replay.data.status === 403, 'replayed signature on a new usageId → 403 (sig bound to the call)');
+
+  console.log('\n• ATTACKER — replays the victim’s EXACT captured payload verbatim (same usageId + sig) [F1]');
+  const verbatim = await attacker.call('query_price_feed', v1args); // byte-identical to the served victim-1 call
+  check(verbatim.isError && verbatim.data.status === 409, 'verbatim replay (same usageId) → 409 single-use (theft-of-SERVICE closed)');
 
   console.log('\n• ATTACKER — expired signature, and wrong-payload signature');
   const expired = await victim.call('query_price_feed', await signed('victim-expired', { notAfter: now() - 1_000n }));

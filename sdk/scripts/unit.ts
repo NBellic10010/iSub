@@ -160,14 +160,14 @@ async function testKeeperNotBefore(): Promise<void> {
 // ===== decoupling: the core barrel must stay Node-dependency-free (isomorphic) =====
 // Browser / agent consumers import the core (`@isub/sdk`); only the declared Node
 // shells — the server-only SUBPATH modules (@isub/sdk/store-file, /webhook, /db,
-// /sql-store, /service, /gateway, /mcp), none re-exported from the index — may touch node:*.
+// /sql-store, /service, /gateway, /mcp, /x402), none re-exported from the index — may touch node:*.
 // This guard fails if any OTHER src file imports node:*, so the index can't silently
 // pull a Node dependency and break browser bundling.
 function testCoreIsomorphism(): void {
   console.log('\n• decoupling (core barrel is Node-dependency-free)');
   const srcDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
   // Server-only subpath modules (NOT exported from src/index.ts) — node:* is expected here.
-  const NODE_SHELLS = new Set(['store-file.ts', 'webhook.ts', 'db.ts', 'sql-store.ts', 'service.ts', 'gateway.ts', 'mcp.ts']);
+  const NODE_SHELLS = new Set(['store-file.ts', 'webhook.ts', 'db.ts', 'sql-store.ts', 'service.ts', 'gateway.ts', 'mcp.ts', 'x402.ts']);
   const offenders: string[] = [];
   for (const f of readdirSync(srcDir)) {
     if (!f.endsWith('.ts') || NODE_SHELLS.has(f)) continue;

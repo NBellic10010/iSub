@@ -37,7 +37,7 @@ export interface ServicePolicy {
 
 export interface UseResult {
   ok: boolean;
-  status: number; // 200 served · 402 not serviceable (gated) · 403 bad credential
+  status: number; // 200 served · 402 not serviceable (gated) · 403 bad credential · 409 duplicate usageId (replay)
   reason?: string;
 }
 
@@ -73,7 +73,7 @@ export class IsubService {
     signer: IsubSigner,
     /** The merchant address every accepted mandate must name as payee (usually `signer.address`). */
     private readonly payoutAddress: string,
-    store: BillerStore,
+    private readonly store: BillerStore,
     policy: ServicePolicy,
     private readonly onEvent?: (e: BillerEvent) => void,
     /** The merchant's price list. Required to use `useMetered` (raw-quantity reporting). */
@@ -110,7 +110,12 @@ export class IsubService {
     }
     if (s.remaining < amount) return { ok: false, status: 402, reason: 'insufficient remaining budget for this request' };
 
-    await this.biller.recordUsage({ mandateId, amount, usageId });
+    // F1: single-use ingest. A duplicate usageId means this call was already served — refuse to
+    // re-serve (else a captured/replayed payload yields unlimited free re-serves; funds are safe via
+    // dedup but the RESOURCE would be re-delivered). recordUsage is the durable idempotency key.
+    if (!(await this.biller.recordUsage({ mandateId, amount, usageId }))) {
+      return { ok: false, status: 409, reason: 'duplicate usageId — already served (replay rejected)' };
+    }
     s.remaining -= amount;
     s.pending += amount;
     // D3 threshold: settle early when un-settled usage is large (bounds the at-risk window).
@@ -152,7 +157,10 @@ export class IsubService {
     }
     if (s.remaining < amount) return { ok: false, status: 402, reason: 'insufficient remaining budget for this request' };
 
-    await this.biller.recordMeteredUsage({ mandateId, items, usageId });
+    // F1: single-use ingest (see `use`). A duplicate usageId → already served → refuse to re-serve.
+    if (!(await this.biller.recordMeteredUsage({ mandateId, items, usageId }))) {
+      return { ok: false, status: 409, reason: 'duplicate usageId — already served (replay rejected)' };
+    }
     s.remaining -= amount;
     s.pending += amount;
     if (this.flushThreshold > 0n && s.pending >= this.flushThreshold) {
@@ -192,9 +200,15 @@ export class IsubService {
     // so the binding is self-verifying (no trusted store). Cached on the session after first sight.
     if (proof.cert) {
       if (!s.subscriber || !(await verifyBinding(mandateId, proof.cert, s.subscriber, now))) return false;
-      if (s.boundVer != null && proof.cert.ver < s.boundVer) return false; // rollback to a rotated-out key
+      // F5: rollback protection must be DURABLE (survive restart / hold across instances), not just the
+      // in-memory session. Floor the accepted ver by max(session, durable store) and reject anything
+      // below it (a rotated-out / leaked older key), then persist any advance so peers see it too.
+      const durableVer = await this.store.getMaxCertVer?.(mandateId);
+      const floor = s.boundVer == null ? durableVer : durableVer == null ? s.boundVer : Math.max(s.boundVer, durableVer);
+      if (floor != null && proof.cert.ver < floor) return false; // rollback to a rotated-out key
       s.boundAgent = proof.cert.agent;
-      s.boundVer = proof.cert.ver;
+      s.boundVer = floor == null ? proof.cert.ver : Math.max(floor, proof.cert.ver);
+      if (durableVer == null || proof.cert.ver > durableVer) await this.store.recordCertVer?.(mandateId, proof.cert.ver);
       // Take the LATER expiry (0 = never) so a concurrent/older cert can't shrink the live session.
       const cn = proof.cert.notAfter;
       s.boundNotAfter = s.boundNotAfter == null ? cn : s.boundNotAfter === 0n || cn === 0n ? 0n : cn > s.boundNotAfter ? cn : s.boundNotAfter;
