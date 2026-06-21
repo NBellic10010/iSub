@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CityGrid Utilities — Pay your bill</title>
+    <style>
+      * { box-sizing: border-box; }
+      :root {
+        --bg: #eef3f8; --panel: #ffffff; --line: #d8e2ec; --fg: #0f2438; --muted: #5d748c;
+        --brand: #0a6ebd; --brand2: #11a3a3; --ok: #15803d;
+      }
+      body { margin: 0; background: var(--bg); color: var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.5; }
+      .wrap { max-width: 560px; margin: 0 auto; padding: 24px 18px 56px; }
+      .topbar { display: flex; align-items: center; justify-content: space-between; }
+      .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; letter-spacing: -0.01em; color: var(--brand); }
+      .brand .mark { width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(135deg, var(--brand), var(--brand2)); display: grid; place-items: center; color: #fff; font-size: 15px; }
+      .gov { color: var(--muted); font-size: 12px; }
+
+      .bill { margin-top: 18px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; box-shadow: 0 8px 30px #0f24380d; }
+      .bill .head { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: flex-start; }
+      .bill .head h1 { margin: 0; font-size: 17px; } .bill .head .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+      .pill { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: #fde9e0; color: #b4530f; }
+      body.enrolled .pill.due { display: none; }
+      .pill.auto { display: none; background: #dcfce7; color: var(--ok); }
+      body.enrolled .pill.auto { display: inline-block; }
+
+      .lines { padding: 6px 20px; }
+      .line { display: flex; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+      .line:last-child { border-bottom: 0; }
+      .line .l { display: flex; align-items: center; gap: 9px; } .line .l .ic { font-size: 17px; }
+      .line .meta { color: var(--muted); font-size: 12px; }
+      .total { display: flex; justify-content: space-between; align-items: baseline; padding: 16px 20px; background: #f6fafe; border-top: 1px solid var(--line); }
+      .total .amt { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+      .total .due { color: #b4530f; font-size: 12.5px; font-weight: 600; }
+
+      .pay { margin-top: 18px; }
+      .pay h2 { font-size: 14px; color: var(--muted); font-weight: 600; margin: 0 0 10px; }
+      .channels { display: grid; gap: 9px; }
+      .btn { width: 100%; padding: 13px 16px; border-radius: 11px; border: 1px solid var(--line); background: #fff; color: var(--fg);
+        font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 9px; }
+      .btn.disabled { opacity: .5; cursor: not-allowed; }
+      .btn.sui { border: 0; background: linear-gradient(135deg, var(--brand), var(--brand2)); color: #fff; box-shadow: 0 10px 26px #0a6ebd33; }
+      .btn .badge { font-size: 12px; background: #ffffff33; padding: 2px 7px; border-radius: 999px; }
+      .note { color: var(--muted); font-size: 12px; margin-top: 11px; text-align: center; }
+      .status { min-height: 20px; margin-top: 13px; font-size: 13.5px; text-align: center; }
+      .status.ok { color: var(--ok); } .status.err { color: #c2410c; }
+      .mono { font-family: ui-monospace, SFMono-Regular, monospace; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="topbar">
+        <div class="brand"><span class="mark">⚡</span> CityGrid Utilities</div>
+        <span class="gov">Account #SF-4471-22 · Apr 2026</span>
+      </div>
+
+      <div class="bill">
+        <div class="head">
+          <div><h1>Monthly utility statement</h1><div class="sub">Billing period: May 1 – May 31, 2026</div></div>
+          <span><span class="pill due">Payment due</span><span class="pill auto">Autopay on ✓</span></span>
+        </div>
+        <div class="lines">
+          <div class="line"><span class="l"><span class="ic">⚡</span><span>Electricity<div class="meta">200 kWh @ 0.0006 SUI</div></span></span><span class="mono">0.120 SUI</span></div>
+          <div class="line"><span class="l"><span class="ic">💧</span><span>Water<div class="meta">12 m³ @ 0.005 SUI</div></span></span><span class="mono">0.060 SUI</span></div>
+          <div class="line"><span class="l"><span class="ic">🗑️</span><span>Waste &amp; recycling<div class="meta">flat monthly</div></span></span><span class="mono">0.020 SUI</span></div>
+        </div>
+        <div class="total"><span><div class="amt">0.200 SUI</div><div class="due">due by Jun 15, 2026</div></span></div>
+      </div>
+
+      <div class="pay">
+        <h2>Pay this bill / set up autopay</h2>
+        <div class="channels">
+          <button class="btn disabled" disabled>🏦 &nbsp;Bank transfer (ACH)</button>
+          <button class="btn disabled" disabled>💳 &nbsp;Credit / debit card</button>
+          <button class="btn sui" id="paySui">◈ &nbsp;Pay with Sui &nbsp;<span class="badge">autopay</span></button>
+        </div>
+        <div class="note">Powered by iSub — you sign one capped, revocable authorization; CityGrid pulls each bill on-chain within it. Funds stay in your wallet.</div>
+        <div class="status" id="status"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/citygrid.ts"></script>
+  </body>
+</html>

@@ -71,7 +71,12 @@ export async function setupX402Testnet(): Promise<TestnetAgent> {
     path: a.path,
     price: BigInt(a.price),
     label: a.label,
-    run: () => (a.path === '/weather' ? { location: 'Tokyo, JP', tempC: 26, forecast: 'humid & warm' } : { ticker: 'NVDA', price: 1234.5, source: 'demo-feed' }),
+    run: () =>
+      a.path === '/web_search'
+        ? { query: 'Sui Overflow 2026', results: [{ title: 'Sui Overflow 2026', url: 'https://sui.io/overflow' }], source: 'cortex-web' }
+        : a.path === '/code_interpreter'
+          ? { language: 'python', stdout: 'hello from the Cortex sandbox\n', exitCode: 0 }
+          : { task: 'caption', caption: 'a butterfly resting on a pink flower', objects: ['butterfly', 'flower'], source: 'cortex-vision' },
   }));
 
   const srv = buildAgentServer({

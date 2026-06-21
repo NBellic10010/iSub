@@ -25,13 +25,13 @@ async function main(): Promise<void> {
   };
 
   const apis = await call('list_paid_apis');
-  const weather = apis.data.find((a: any) => a.url.endsWith('/weather'));
-  check(!!weather, 'list_paid_apis → /weather');
+  const tool = apis.data.find((a: any) => a.url.endsWith('/web_search'));
+  check(!!tool, 'list_paid_apis → /web_search (Cortex MCP)');
   const before = await call('budget_status');
   console.log(`  budget before: ${before.data.spent} / ${before.data.budget}`);
 
-  console.log('• pay /weather (REAL on-chain charge_metered)…');
-  const r = await call('pay', { url: weather.url });
+  console.log('• pay /web_search (REAL on-chain charge_metered)…');
+  const r = await call('pay', { url: tool.url });
   check(!r.isError && r.data.paid === true && r.data.status === 200, 'pay → 402 → on-chain settled → 200');
   check(!!r.data.settlement?.digest && r.data.settlement?.settlement === 'final', 'returned a REAL on-chain digest');
   console.log(`  digest:   ${r.data.settlement?.digest}`);

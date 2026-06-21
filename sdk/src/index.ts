@@ -15,6 +15,7 @@ export * from './pricing';
 export * from './consent';
 export * from './agent-auth';
 export * from './scheduler';
+export * from './compliance';
 // Role-surface subpaths — import directly, not via the core index:
 //   `@isub/sdk/agent`       — IsubAgent + MCP/LangChain tool descriptors (agent/payer runtime; dep-free)
 //   `@isub/sdk/biller`      — IsubBiller PAYG metering→settle pipeline + memBillerStore (service/payee; dep-free)

@@ -7,10 +7,11 @@ import { useIsub } from '@/lib/use-isub';
 import { fmtSui, toMist, shortId } from '@/lib/format';
 import { Card, Badge, Button, AddressChip } from '@/components/ui';
 import { Logo } from '@/components/logo';
+import { ExportReportButton } from '@/components/compliance-report';
 import { webGateway } from '@/lib/gateway';
 
 const INTERVALS = [
-  { label: '1 minute (test)', ms: 60_000n },
+  { label: '5 seconds (test)', ms: 5_000n },
   { label: '1 hour', ms: 3_600_000n },
   { label: '1 day', ms: 86_400_000n },
   { label: '1 week', ms: 604_800_000n },
@@ -196,7 +197,10 @@ export default function MerchantPlans() {
           </section>
 
           <section className="card">
-            <h3 style={{ fontSize: 15, marginBottom: 12 }}>Your plans</h3>
+            <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
+              <h3 style={{ fontSize: 15, margin: 0 }}>Your plans</h3>
+              <ExportReportButton party="merchant" address={address} />
+            </div>
             {plans.length === 0 && <p className="muted" style={{ fontSize: 14 }}>No plans yet. Publish one above, then embed its checkout on your site.</p>}
             {plans.map(({ id, plan: p }) => (
               <div key={id} style={{ borderTop: '0.5px solid var(--border)', padding: '12px 0' }}>

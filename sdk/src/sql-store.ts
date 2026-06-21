@@ -416,3 +416,22 @@ export function chargesByMandate(db: Db, mandateId: string, limit = 2000): Charg
     .all(mandateId, limit) as unknown as ChargeFull[];
   return rows.map((r) => ({ mandateId: r.mandate_id, kind: r.kind, amount: r.amount != null ? BigInt(r.amount) : null, seq: r.seq, digest: r.digest, atMs: r.at_ms }));
 }
+
+/**
+ * Idempotently record a settled on-chain charge into the gateway journal (`kind='charged'`), so the
+ * dashboard's `/charges` series reflects it — including FIXED `charge`s, which don't flow through the
+ * metered biller path. Keyed by (mandate_id, seq): re-recording the same charge is a no-op (returns
+ * false). Lets the standalone keeper feed the same db the gateway serves, like `biller-run` does.
+ */
+export function recordCharge(
+  db: Db,
+  c: { mandateId: string; amount: bigint; seq: number; digest: string; atMs: number; merchantId?: string },
+): boolean {
+  const dup = db.prepare(`SELECT 1 FROM charges WHERE mandate_id = ? AND seq = ? AND kind = 'charged' LIMIT 1`).get(c.mandateId, c.seq);
+  if (dup) return false;
+  db.prepare(
+    `INSERT INTO charges (merchant_id, mandate_id, kind, amount, seq, digest, reason, state, usage_ids, at_ms)
+     VALUES (?, ?, 'charged', ?, ?, ?, NULL, NULL, NULL, ?)`,
+  ).run(c.merchantId ?? 'keeper', c.mandateId, c.amount.toString(), c.seq, c.digest, c.atMs);
+  return true;
+}

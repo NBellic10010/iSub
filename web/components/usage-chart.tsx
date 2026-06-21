@@ -4,6 +4,7 @@ import { webGateway, type UsagePointJson, type ChargePointJson } from '@/lib/gat
 import { fmtSui } from '@/lib/format';
 
 const gw = webGateway();
+const REFRESH_MS = 5000; // re-poll the gateway so new charges (keeper bills on interval) show live
 type Pt = { amount: bigint; atMs: number; label: string };
 
 // Per-mandate usage chart. Prefers the PAYG metered-usage series (`usage_records`); falls back to the
@@ -15,7 +16,7 @@ export function UsageChart({ mandateId }: { mandateId: string }) {
 
   useEffect(() => {
     let live = true;
-    void (async () => {
+    const load = async (): Promise<void> => {
       try {
         const [usage, charges] = await Promise.all([
           gw.usage(mandateId).catch(() => [] as UsagePointJson[]),
@@ -27,17 +28,21 @@ export function UsageChart({ mandateId }: { mandateId: string }) {
         } else {
           setSeries({ kind: 'charges', pts: charges.filter((c) => c.amount != null).map((c) => ({ amount: BigInt(c.amount as string), atMs: c.atMs, label: `seq ${c.seq ?? '?'}` })) });
         }
+        setErr(null);
       } catch {
         if (live) setErr('usage unavailable — is the gateway running?');
       }
-    })();
+    };
+    void load();
+    const t = setInterval(() => void load(), REFRESH_MS); // live-refresh so interval charges appear without a reload
     return () => {
       live = false;
+      clearInterval(t);
     };
   }, [mandateId]);
 
-  if (err) return <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>{err}</p>;
-  if (!series) return <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>loading usage…</p>;
+  // Once we have a series, keep showing it through transient poll errors (don't blank the chart).
+  if (!series) return <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>{err ?? 'loading usage…'}</p>;
   if (series.pts.length === 0) return <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>No usage or charges yet — they appear once this subscription is metered or charged.</p>;
 
   const pts = series.pts;

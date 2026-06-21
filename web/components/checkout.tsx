@@ -38,7 +38,9 @@ function readParams(): CheckoutParams | null {
 
 function post(origin: string, msg: Record<string, unknown>): void {
   try {
-    window.parent?.postMessage({ source: 'isub-checkout', ...msg }, origin || '*');
+    // iframe mode → window.parent; popup mode → window.opener. Pick whichever is the embedder.
+    const target = window.opener && window.opener !== window ? window.opener : window.parent;
+    target?.postMessage({ source: 'isub-checkout', ...msg }, origin || '*');
   } catch {
     /* standalone (not embedded) — ignore */
   }

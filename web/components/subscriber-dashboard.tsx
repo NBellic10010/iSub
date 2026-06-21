@@ -11,6 +11,7 @@ import { webGateway } from '@/lib/gateway';
 import { UsageChart } from '@/components/usage-chart';
 import { WalletUsageTable } from '@/components/wallet-usage-table';
 import { X402AgentExport } from '@/components/x402-agent-export';
+import { ExportReportButton } from '@/components/compliance-report';
 
 type Sub = { id: string; mandate: MandateState | null };
 type Exposure = Awaited<ReturnType<typeof accountExposure>>;
@@ -113,7 +114,11 @@ export default function SubscriberDashboard() {
     let acc = localStorage.getItem(`${ns}:account`);
     const ids = new Set(JSON.parse(localStorage.getItem(`${ns}:mandates`) ?? '[]') as string[]);
     try {
-      const [accs, mans] = await Promise.all([gw.accountsByOwner(address), gw.mandatesBySubscriber(address)]);
+      // discoverMandatesBySubscriber (not the plain read) so we list the wallet's COMPLETE set —
+      // it reconciles against chain (scans MandateAuthorized events + ingests any the index missed),
+      // recovering subscriptions made on another device / outside iSub's surfaces. The 5s poll below
+      // stays on the cheap cached read; this fuller scan runs only here, on connect/load.
+      const [accs, mans] = await Promise.all([gw.accountsByOwner(address), gw.discoverMandatesBySubscriber(address)]);
       // Only ADOPT a gateway-discovered account the chain can actually confirm — skip rows the chain
       // can't read (mock / deleted / not-yet-finalized), so an unreadable index row never breaks the
       // balance or leaves deposit/withdraw pointing at a non-existent account.
@@ -130,10 +135,13 @@ export default function SubscriberDashboard() {
       }
       for (const m of mans) ids.add(m.mandateId);
       if (acc) localStorage.setItem(`${ns}:account`, acc);
-      localStorage.setItem(`${ns}:mandates`, JSON.stringify([...ids]));
     } catch {
       /* gateway unavailable → fall back to locally-remembered ids */
     }
+    // Drop ids the user cleared (unreadable: deleted / wrong network / stale) so gateway
+    // re-discovery doesn't resurrect them. Re-tracking an id un-dismisses it (see doTrack).
+    for (const d of JSON.parse(localStorage.getItem(`${ns}:dismissed`) ?? '[]') as string[]) ids.delete(d);
+    localStorage.setItem(`${ns}:mandates`, JSON.stringify([...ids]));
     setAccountId(acc);
     void refreshWallet();
     if (acc) void refreshAccount(acc);
@@ -145,6 +153,17 @@ export default function SubscriberDashboard() {
     setInfo(null);
     void load();
   }, [load]);
+
+  // Live poll (~5s): re-read on-chain mandate state so keeper charges (FIXED interval / PAYG) make
+  // spentTotal tick up on screen without a manual reload — essential for the recurring-charge demo.
+  useEffect(() => {
+    if (!connected) return;
+    const t = setInterval(() => {
+      const ids = JSON.parse(localStorage.getItem(`${ns}:mandates`) ?? '[]') as string[];
+      void refreshSubs(accountId, ids);
+    }, 5000);
+    return () => clearInterval(t);
+  }, [connected, accountId, ns, refreshSubs]);
 
   function mandateIds(): string[] {
     return JSON.parse(localStorage.getItem(`${ns}:mandates`) ?? '[]') as string[];
@@ -197,12 +216,44 @@ export default function SubscriberDashboard() {
     run('Tracking subscription…', async () => {
       const id = trackId.trim();
       if (!id) return;
+      const undismissed = (JSON.parse(localStorage.getItem(`${ns}:dismissed`) ?? '[]') as string[]).filter((d) => d !== id);
+      localStorage.setItem(`${ns}:dismissed`, JSON.stringify(undismissed));
       const ids = [...new Set([...mandateIds(), id])];
       localStorage.setItem(`${ns}:mandates`, JSON.stringify(ids));
       setTrackId('');
       try { await gw.ingestMandate(id); } catch { /* gateway down — local only */ }
       await refreshSubs(accountId, ids);
       return `Now watching ${shortId(id)}`;
+    });
+
+  // Remove the rows the chain can't read (deleted / wrong network / stale). They're added to a
+  // dismissed set so load()'s gateway re-discovery won't bring them back; re-track to undo.
+  const doClearUnreadable = () =>
+    run('Clearing…', async () => {
+      const dead = subs.filter((s) => !s.mandate).map((s) => s.id);
+      if (dead.length === 0) return;
+      const dismissed = new Set(JSON.parse(localStorage.getItem(`${ns}:dismissed`) ?? '[]') as string[]);
+      dead.forEach((d) => dismissed.add(d));
+      localStorage.setItem(`${ns}:dismissed`, JSON.stringify([...dismissed]));
+      localStorage.setItem(`${ns}:mandates`, JSON.stringify(mandateIds().filter((id) => !dismissed.has(id))));
+      setSubs((prev) => prev.filter((s) => s.mandate));
+      if (chartFor && dead.includes(chartFor)) setChartFor(null);
+      return `Cleared ${dead.length} unreadable record${dead.length > 1 ? 's' : ''}`;
+    });
+
+  // Hide cancelled (revoked) subscriptions — readable but terminal. Same dismissed-set trick so load()'s
+  // chain re-discovery won't bring them back (revoke leaves the original MandateAuthorized event behind).
+  const doClearRevoked = () =>
+    run('Clearing…', async () => {
+      const gone = subs.filter((s) => s.mandate?.status === MandateStatus.Revoked).map((s) => s.id);
+      if (gone.length === 0) return;
+      const dismissed = new Set(JSON.parse(localStorage.getItem(`${ns}:dismissed`) ?? '[]') as string[]);
+      gone.forEach((d) => dismissed.add(d));
+      localStorage.setItem(`${ns}:dismissed`, JSON.stringify([...dismissed]));
+      localStorage.setItem(`${ns}:mandates`, JSON.stringify(mandateIds().filter((id) => !dismissed.has(id))));
+      setSubs((prev) => prev.filter((s) => s.mandate?.status !== MandateStatus.Revoked));
+      if (chartFor && gone.includes(chartFor)) setChartFor(null);
+      return `Cleared ${gone.length} revoked subscription${gone.length > 1 ? 's' : ''}`;
     });
 
   // Read a plan's REAL terms from chain (same neutral read the checkout uses) before authorizing.
@@ -214,6 +265,19 @@ export default function SubscriberDashboard() {
       setQuotedPlan(p);
       setSubMaxPerCharge(p.mode === ChargeMode.Fixed ? '' : fmtSui(p.rateCap)); // PAYG: default per-charge cap = rate cap
       return `Loaded terms for ${shortId(p.id)}`;
+    });
+
+  // One-click re-subscribe from a revoked row. Revoke is terminal (you can't un-revoke), so the way
+  // back is a NEW mandate on the SAME plan — this loads that plan into the Subscribe form below. It
+  // reads the plan id off the mandate (the row only shows the mandate id), avoiding the dead-end where
+  // pasting the mandate id into the plan field makes `quoteFromPlan` throw.
+  const doResubscribe = (planId: string) =>
+    run('Loading plan terms…', async () => {
+      setPlanIdInput(planId);
+      const p = await isub.quoteFromPlan(planId);
+      setQuotedPlan(p);
+      setSubMaxPerCharge(p.mode === ChargeMode.Fixed ? '' : fmtSui(p.rateCap));
+      return `Loaded ${shortId(p.id)} — set your budget below and Subscribe`;
     });
 
   // Actively subscribe: authorize a capped, revocable mandate against the reviewed plan. Opens an
@@ -416,11 +480,30 @@ export default function SubscriberDashboard() {
           <section className="card">
             <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
               <h3 style={{ fontSize: 15 }}>Your subscriptions</h3>
+              <ExportReportButton party="subscriber" address={address} />
             </div>
             <div className="row" style={{ marginBottom: 14 }}>
               <input className="input" style={{ flex: 1, minWidth: 220, fontFamily: 'var(--mono)', fontSize: 13 }} placeholder="track a mandate id (0x…)" value={trackId} onChange={(e) => setTrackId(e.target.value)} aria-label="mandate id to track" />
               <Button onClick={doTrack} disabled={!!busy || !trackId.trim()}>Track</Button>
             </div>
+
+            {subs.some((s) => !s.mandate) && (
+              <div className="row" style={{ justifyContent: 'space-between', marginBottom: 14, marginTop: -2 }}>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {subs.filter((s) => !s.mandate).length} unreadable record{subs.filter((s) => !s.mandate).length > 1 ? 's' : ''} — deleted, wrong network, or stale
+                </span>
+                <button className="btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={doClearUnreadable} disabled={!!busy}>Clear unreadable</button>
+              </div>
+            )}
+
+            {subs.some((s) => s.mandate?.status === MandateStatus.Revoked) && (
+              <div className="row" style={{ justifyContent: 'space-between', marginBottom: 14, marginTop: -2 }}>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {subs.filter((s) => s.mandate?.status === MandateStatus.Revoked).length} revoked subscription{subs.filter((s) => s.mandate?.status === MandateStatus.Revoked).length > 1 ? 's' : ''} — no longer chargeable
+                </span>
+                <button className="btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={doClearRevoked} disabled={!!busy}>Clear revoked</button>
+              </div>
+            )}
 
             {subs.length === 0 && <p className="muted" style={{ fontSize: 14 }}>No subscriptions yet. Subscribe via a merchant’s iSub checkout, then track it here.</p>}
 
@@ -452,6 +535,11 @@ export default function SubscriberDashboard() {
                       <div className="row">
                         <Button onClick={() => doResume(id)} disabled={!!busy}>Resume</Button>
                         <Button onClick={() => doRevoke(id)} disabled={!!busy}>Unsubscribe</Button>
+                      </div>
+                    )}
+                    {m.status === MandateStatus.Revoked && (
+                      <div className="row">
+                        <Button onClick={() => doResubscribe(m.planId)} disabled={!!busy}>Re-subscribe</Button>
                       </div>
                     )}
                     {m.mode === ChargeMode.Payg && m.status === MandateStatus.Active && (

@@ -24,6 +24,12 @@ export interface CheckoutOptions {
   consent?: boolean;
   /** Override the iSub checkout host (default https://localhost:3000/checkout for dev). */
   checkoutUrl?: string;
+  /**
+   * How to present the checkout. 'iframe' (default) = an in-page modal (trusted display, production).
+   * 'popup' = a top-level window — use it on localhost, where the browser silently refuses to load a
+   * self-signed-cert iframe and some wallets won't inject into a cross-origin frame.
+   */
+  mode?: 'iframe' | 'popup';
 }
 
 export interface CheckoutResult {
@@ -45,11 +51,45 @@ function buildUrl(opts: CheckoutOptions): string {
   return `${base}?${q.toString()}`;
 }
 
+interface CheckoutMessage { source?: string; type?: string; ok?: boolean; mandateId?: string; accountId?: string; reason?: string }
+
+/** Top-level popup flow (no iframe) — robust on localhost / for wallets that don't inject into frames. */
+function openPopup(url: string, checkoutOrigin: string): Promise<CheckoutResult> {
+  return new Promise<CheckoutResult>((resolve) => {
+    const w = 460;
+    const h = 680;
+    const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
+    const top = window.screenY + Math.max(0, (window.outerHeight - h) / 2);
+    const popup = window.open(url, 'isub-checkout', `popup=1,width=${w},height=${h},left=${Math.round(left)},top=${Math.round(top)}`);
+    if (!popup) return resolve({ ok: false, reason: 'popup blocked — allow popups for this site, then retry' });
+
+    let settled = false;
+    const finish = (r: CheckoutResult): void => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('message', onMessage);
+      clearInterval(poll);
+      try { popup.close(); } catch { /* already closed */ }
+      resolve(r);
+    };
+    const onMessage = (e: MessageEvent): void => {
+      if (e.origin !== checkoutOrigin) return; // only trust the checkout origin
+      const d = e.data as CheckoutMessage;
+      if (d?.source !== 'isub-checkout') return;
+      if (d.type === 'isub:result') finish({ ok: !!d.ok, mandateId: d.mandateId, accountId: d.accountId });
+      else if (d.type === 'isub:cancel') finish({ ok: false, reason: 'cancelled' });
+    };
+    const poll = setInterval(() => { if (popup.closed) finish({ ok: false, reason: 'dismissed' }); }, 500);
+    window.addEventListener('message', onMessage);
+  });
+}
+
 export const iSubCheckout = {
   /** Open the checkout modal. Resolves when the user finishes, cancels, or dismisses. */
   open(opts: CheckoutOptions): Promise<CheckoutResult> {
     const url = buildUrl(opts);
     const checkoutOrigin = new URL(url).origin;
+    if (opts.mode === 'popup') return openPopup(url, checkoutOrigin);
 
     return new Promise<CheckoutResult>((resolve) => {
       const overlay = document.createElement('div');

@@ -7,18 +7,27 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const serverScript = join(here, 'isub-x402-agent.ts');
 
-// In testnet mode, pass the MCP server the env it needs (real-chain flag, sqlite, network) explicitly
-// via the mcp-config so it's independent of how Claude propagates env to spawned servers.
+// Two demo personas, selected by env:
+//   default / ISUB_X402_TESTNET=1 — the x402 PAYG agent (list_paid_apis / pay / budget_status)
+//   ISUB_TOKEN_AGENT=1            — the wallet/subscribe agent for a FIXED token package
+//                                   (list_services / subscribe / budget_status / unsubscribe)
+const tokenMode = process.env.ISUB_TOKEN_AGENT === '1';
 const testnet = process.env.ISUB_X402_TESTNET === '1';
-const env = testnet
-  ? { ISUB_X402_TESTNET: '1', NODE_OPTIONS: '--experimental-sqlite', ISUB_NETWORK: process.env.ISUB_NETWORK ?? 'testnet' }
-  : undefined;
+const serverScript = join(here, tokenMode ? 'isub-token-agent.ts' : 'isub-x402-agent.ts');
+
+// Pass the MCP server the env it needs explicitly via mcp-config (independent of how Claude propagates env).
+const env = tokenMode
+  ? { ISUB_TOKEN_AGENT: '1', ISUB_NETWORK: process.env.ISUB_NETWORK ?? 'testnet' }
+  : testnet
+    ? { ISUB_X402_TESTNET: '1', NODE_OPTIONS: '--experimental-sqlite', ISUB_NETWORK: process.env.ISUB_NETWORK ?? 'testnet' }
+    : undefined;
 const mcpConfig = JSON.stringify({
   mcpServers: { isub: { command: 'npx', args: ['tsx', serverScript], ...(env ? { env } : {}) } },
 });
-const ALLOWED = 'mcp__isub__list_paid_apis,mcp__isub__pay,mcp__isub__budget_status';
+const ALLOWED = tokenMode
+  ? 'mcp__isub__list_services,mcp__isub__subscribe,mcp__isub__budget_status,mcp__isub__unsubscribe'
+  : 'mcp__isub__list_paid_apis,mcp__isub__pay,mcp__isub__budget_status';
 
 const args = ['--mcp-config', mcpConfig, '--allowedTools', ALLOWED, ...process.argv.slice(2)];
 

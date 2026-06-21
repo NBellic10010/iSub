@@ -24,3 +24,6 @@ scripts/.x402-testnet.json
 scripts/.x402-testnet.db
 scripts/.x402-testnet.db-shm
 scripts/.x402-testnet.db-wal
+
+# scenario-4 token-agent demo: config holds the agent PRIVATE KEY — NEVER commit
+scripts/.token-agent.json

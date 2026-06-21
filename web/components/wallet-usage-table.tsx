@@ -4,6 +4,7 @@ import { webGateway, type UsagePointJson, type ChargePointJson } from '@/lib/gat
 import { fmtSui } from '@/lib/format';
 
 const gw = webGateway();
+const REFRESH_MS = 5000; // re-poll so interval charges roll into the trailing windows live
 
 // Trailing (cumulative) windows: each total counts everything within the last <ms>, so 1h ⊆ 1d ⊆ 1 week ⊆ 1 month.
 const WINDOWS: { label: string; ms: number }[] = [
@@ -32,9 +33,7 @@ export function WalletUsageTable({ mandateIds }: { mandateIds: string[] }) {
       setErr(null);
       return;
     }
-    setData(null);
-    setErr(null);
-    void (async () => {
+    const load = async (): Promise<void> => {
       try {
         const per = await Promise.all(
           mandateIds.map(async (id): Promise<Pt[]> => {
@@ -48,13 +47,19 @@ export function WalletUsageTable({ mandateIds }: { mandateIds: string[] }) {
               .map((c) => ({ amount: BigInt(c.amount as string), atMs: c.atMs }));
           }),
         );
-        if (live) setData({ pts: per.flat(), now: Date.now() });
+        if (live) {
+          setData({ pts: per.flat(), now: Date.now() });
+          setErr(null);
+        }
       } catch {
         if (live) setErr('usage unavailable — is the gateway running?');
       }
-    })();
+    };
+    void load();
+    const t = setInterval(() => void load(), REFRESH_MS); // live-refresh; updates in place (no loading flicker)
     return () => {
       live = false;
+      clearInterval(t);
     };
     // key encodes mandateIds; re-run when the set of mandates changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -85,12 +90,14 @@ export function WalletUsageTable({ mandateIds }: { mandateIds: string[] }) {
         Metered usage and settlements pulled from your wallet, totalled over each trailing window.
       </p>
 
-      {err ? (
-        <p className="muted" style={{ fontSize: 13, margin: 0 }}>{err}</p>
-      ) : mandateIds.length === 0 ? (
+      {mandateIds.length === 0 ? (
         <p className="muted" style={{ fontSize: 13, margin: 0 }}>No subscriptions yet — usage appears once you subscribe.</p>
       ) : !data ? (
-        <p className="muted" style={{ fontSize: 13, margin: 0 }}>loading usage…</p>
+        err ? (
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>{err}</p>
+        ) : (
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>loading usage…</p>
+        )
       ) : (
         <>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>

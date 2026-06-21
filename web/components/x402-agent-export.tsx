@@ -14,8 +14,9 @@ import { Button } from '@/components/ui';
 // convenient for a local demo, NOT a production pattern. The cert lifetime is BOUNDED (F2) so a leaked
 // key self-expires; for production, mint agent keys in a KMS/secure enclave and never export them.
 const APIS = [
-  { path: '/weather', price: '1000000', label: 'Weather forecast (per call)' },
-  { path: '/premium-quote', price: '5000000', label: 'Premium stock quote (per call)' },
+  { path: '/web_search', price: '1000000', label: 'Web Search MCP (per call)' },
+  { path: '/code_interpreter', price: '3000000', label: 'Code Interpreter MCP (per call)' },
+  { path: '/vision', price: '5000000', label: 'Vision MCP (per call)' },
 ];
 // F2: cap the binding cert at 30 days (and never beyond the mandate's own expiry) — not 0 (never-expire).
 const CERT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -69,6 +70,18 @@ export function X402AgentExport({
     }
   };
 
+  const download = (): void => {
+    if (!out) return;
+    const url = URL.createObjectURL(new Blob([out], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'x402-testnet.json'; // move/rename to sdk/scripts/.x402-testnet.json
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div style={{ marginTop: 8 }}>
       <Button onClick={generate} disabled={busy}>{busy ? 'Signing…' : 'Export x402 agent config'}</Button>
@@ -79,8 +92,11 @@ export function X402AgentExport({
             ⚠ DEMO ONLY — this contains the agent’s private key in plaintext. Don’t commit or reuse it in production; mint agent keys in a KMS/enclave. The cert auto-expires (≤30 days).
           </p>
           <p className="muted" style={{ fontSize: 12, margin: '0 0 4px' }}>
-            Save as <code>sdk/scripts/.x402-testnet.json</code>, then <code>npm run isub:claude:testnet</code>. Your wallet signed the binding, so the agent pays THIS mandate → charges show up here.
+            Download (or copy) → put it at <code>sdk/scripts/.x402-testnet.json</code> → <code>npm run isub:claude:testnet</code>. Your wallet signed the binding, so the agent pays THIS mandate → charges show up here.
           </p>
+          <div className="row" style={{ gap: 8, marginBottom: 6 }}>
+            <Button onClick={download}>Download .x402-testnet.json</Button>
+          </div>
           <textarea
             readOnly
             value={out}

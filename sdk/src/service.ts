@@ -179,6 +179,16 @@ export class IsubService {
   }
 
   /**
+   * Forget the cached session so the next `use()`/`useMetered()` re-validates from chain. Needed
+   * because a session that went non-serviceable on a RECOVERABLE event (e.g. `insufficient_balance`
+   * when the Account ran dry) would otherwise stay dead for the life of the process — a caller that
+   * keeps retrying after the subscriber tops up must evict to pick the funds back up.
+   */
+  evict(mandateId: string): void {
+    this.sessions.delete(mandateId);
+  }
+
+  /**
    * Agent proof-of-possession gate (closes the bearer-mandateId hole). 'off' → always allow; 'warn'
    * → verify + log but allow; 'enforce' → only a valid proof passes. `payload` binds the signature to
    * THIS exact charge (amount or sorted meter items) so a captured signature can't be reused.

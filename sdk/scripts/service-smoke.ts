@@ -115,7 +115,16 @@ async function main(): Promise<void> {
   const afterRevoke = await svcD.use('D', 30n, 'd3');
   check(afterRevoke.status === 402 && afterRevoke.reason === 'not_billable', 'service stops serving after detecting the revoke');
 
-  console.log(`\n✅ service smoke passed — ${checks} assertions (credential · gate · threshold · revoke-stop)`);
+  // ===== D': evict() forces a fresh chain re-read so a RECOVERED mandate resumes (payg-biller's
+  // recovery linchpin: pause→resume / account top-up / rolled rate window). =====
+  chainD.mandates.get('D')!.status = MandateStatus.Active; // subscriber resumes (pause→active analog)
+  check((await svcD.use('D', 30n, 'd4')).status === 402, 'without evict: stale cached non-serviceable session still 402 after recovery');
+  check(svcD.status('D') !== null, 'session is cached before evict');
+  svcD.evict('D');
+  check(svcD.status('D') === null, 'evict() clears the cached session');
+  check((await svcD.use('D', 30n, 'd5')).status === 200, 'after evict: re-reads chain → serves the recovered mandate again');
+
+  console.log(`\n✅ service smoke passed — ${checks} assertions (credential · gate · threshold · revoke-stop · evict-recovery)`);
 }
 
 main().catch((e) => {

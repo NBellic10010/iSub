@@ -15,6 +15,9 @@ export const PACKAGE_IDS: Record<string, string> = {
 // One dApp-kit instance for the whole app (wallet connection + active network).
 // iSub talks to the chain through its OWN SuiGrpcClient (see use-isub.ts).
 export const dAppKit = createDAppKit({
+  // Start every visit signed-OUT — don't silently reconnect the last wallet (default is true).
+  // The subscriber/merchant dashboards gate on `connected` and show a Connect prompt instead.
+  autoConnect: false,
   networks: ['testnet', 'localnet'],
   defaultNetwork: 'testnet',
   createClient: (network) => new SuiGrpcClient({ network, baseUrl: GRPC_URLS[network]! }),

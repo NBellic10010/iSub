@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AfterDark — @mia.aurora</title>
+    <style>
+      * { box-sizing: border-box; }
+      :root {
+        --bg: #0b0710; --panel: #15101d; --line: #2a2233; --fg: #f4eef8; --muted: #a596b5;
+        --accent: #ff3d8b; --accent2: #8b5cf6;
+      }
+      body { margin: 0; background: radial-gradient(1200px 600px at 70% -10%, #2a0f2b 0%, var(--bg) 55%); color: var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; line-height: 1.5; }
+      .wrap { max-width: 720px; margin: 0 auto; padding: 28px 20px 64px; }
+      .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; letter-spacing: -0.02em; font-size: 19px; }
+      .brand .dot { width: 11px; height: 11px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 0 16px var(--accent); }
+      .cover { height: 150px; border-radius: 18px; margin: 18px 0 -44px; background: linear-gradient(120deg, #ff3d8b33, #8b5cf633), repeating-linear-gradient(45deg, #ffffff08 0 12px, transparent 12px 24px); border: 1px solid var(--line); }
+      .profile { display: flex; align-items: flex-end; gap: 16px; padding: 0 8px; }
+      .avatar { width: 92px; height: 92px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); border: 4px solid var(--bg); display: grid; place-items: center; font-size: 40px; }
+      .who h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; } .who .handle { color: var(--muted); font-size: 14px; }
+      .stats { display: flex; gap: 18px; margin: 14px 8px 0; color: var(--muted); font-size: 13px; }
+      .stats b { color: var(--fg); }
+      .bio { margin: 14px 8px 22px; color: #d9cfe4; font-size: 15px; }
+
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .tile { position: relative; aspect-ratio: 1; border-radius: 14px; overflow: hidden; border: 1px solid var(--line);
+        background: linear-gradient(135deg, #3a2740, #1c1426); }
+      .tile .img { position: absolute; inset: 0; display: grid; place-items: center; font-size: 38px; opacity: .8; filter: blur(14px); transition: filter .5s ease; }
+      .tile .lock { position: absolute; inset: 0; display: grid; place-items: center; font-size: 24px; background: rgba(8,5,12,.35); transition: opacity .4s ease; }
+      body.unlocked .tile .img { filter: none; }
+      body.unlocked .tile .lock { opacity: 0; }
+
+      .paycard { margin-top: 26px; border: 1px solid var(--line); border-radius: 18px; padding: 22px; background:
+        linear-gradient(180deg, #1b1326, #140e1d); }
+      .paycard h2 { margin: 0 0 2px; font-size: 18px; }
+      .paycard .price { color: var(--muted); font-size: 14px; margin-bottom: 16px; }
+      .paycard .price b { color: var(--fg); }
+      .channels { display: grid; gap: 10px; }
+      .btn { width: 100%; padding: 13px 16px; border-radius: 12px; border: 1px solid var(--line); background: #1f1730; color: var(--fg);
+        font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 9px; }
+      .btn.disabled { opacity: .45; cursor: not-allowed; }
+      .btn.sui { border: 0; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; box-shadow: 0 10px 30px #ff3d8b3a; }
+      .btn .sui-badge { font-size: 12px; background: #ffffff2e; padding: 2px 7px; border-radius: 999px; }
+      .note { color: var(--muted); font-size: 12px; margin-top: 12px; text-align: center; }
+      .status { min-height: 20px; margin-top: 14px; font-size: 13.5px; text-align: center; }
+      .status.ok { color: #4ade80; } .status.err { color: #fb7185; }
+      .mono { font-family: ui-monospace, SFMono-Regular, monospace; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="brand"><span class="dot"></span> AfterDark</div>
+
+      <div class="cover"></div>
+      <div class="profile">
+        <div class="avatar">🦋</div>
+        <div class="who"><h1>Mia Aurora</h1><div class="handle">@mia.aurora · 🔞 18+</div></div>
+      </div>
+      <div class="stats"><span><b>1,284</b> posts</span><span><b>92.4K</b> fans</span><span><b>4.9★</b> rating</span></div>
+      <p class="bio">Exclusive photosets &amp; behind-the-scenes, posted daily. Subscribe to unlock my full feed 💋</p>
+
+      <div class="grid" id="feed">
+        <div class="tile"><div class="img">📸</div><div class="lock">🔒</div></div>
+        <div class="tile"><div class="img">🎬</div><div class="lock">🔒</div></div>
+        <div class="tile"><div class="img">🔥</div><div class="lock">🔒</div></div>
+        <div class="tile"><div class="img">💄</div><div class="lock">🔒</div></div>
+        <div class="tile"><div class="img">🌹</div><div class="lock">🔒</div></div>
+        <div class="tile"><div class="img">✨</div><div class="lock">🔒</div></div>
+      </div>
+
+      <div class="paycard">
+        <h2>Subscribe to unlock</h2>
+        <div class="price">Recurring subscription · <b>billed on-chain, cancel anytime</b></div>
+        <div class="channels">
+          <button class="btn disabled" disabled>💳 &nbsp;Credit / debit card</button>
+          <button class="btn disabled" disabled>🅿️ &nbsp;PayPal</button>
+          <button class="btn sui" id="paySui">◈ &nbsp;Pay with Sui <span class="sui-badge">non-custodial</span></button>
+        </div>
+        <div class="note">Powered by iSub — funds stay in your wallet; AfterDark can only pull within the cap you sign.</div>
+        <div class="status" id="status"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/afterdark.ts"></script>
+  </body>
+</html>

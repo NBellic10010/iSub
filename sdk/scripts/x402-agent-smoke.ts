@@ -13,7 +13,7 @@ const check = (c: boolean, label: string): void => { if (!c) throw new Error('�
 async function main(): Promise<void> {
   const demo = await setupX402Demo();
   const { url, server } = await demo.startSeller(0); // ephemeral port
-  console.log(`• demo x402 seller on ${url} (endpoints: /weather 1000, /premium-quote 5000)`);
+  console.log(`• Cortex MCP seller on ${url} (endpoints: /web_search 1000, /code_interpreter 3000, /vision 5000)`);
   const tools = demo.buildTools(url);
 
   const mcp = createIsubMcpServer({ name: 'isub-x402', walletTools: tools });
@@ -31,26 +31,26 @@ async function main(): Promise<void> {
 
   console.log('\n• B: discover paid APIs');
   const apis = await call('list_paid_apis');
-  const weather = apis.data.find((a: any) => a.url.endsWith('/weather'));
-  const premium = apis.data.find((a: any) => a.url.endsWith('/premium-quote'));
-  check(!!weather && !!premium, 'list_paid_apis returns /weather and /premium-quote with prices');
+  const search = apis.data.find((a: any) => a.url.endsWith('/web_search'));
+  const code = apis.data.find((a: any) => a.url.endsWith('/code_interpreter'));
+  check(!!search && !!code, 'list_paid_apis returns /web_search and /code_interpreter with prices');
 
   console.log('\n• C: pay (the full x402 round-trip through the MCP pay tool)');
-  const r1 = await call('pay', { url: weather.url });
+  const r1 = await call('pay', { url: search.url });
   check(!r1.isError && r1.data.paid === true && r1.data.status === 200, 'pay → 402 → auto-paid via mandate (PoP) → 200');
-  check(r1.data.result?.location === 'Tokyo, JP' && r1.data.charged === '1000', 'returned the weather result; charged 1000');
+  check(r1.data.result?.source === 'cortex-web' && r1.data.charged === '1000', 'returned the web_search result; charged 1000');
 
   console.log('\n• D: budget moved on-chain');
   const b1 = await call('budget_status');
   check(b1.data.spent === '1000', 'budget_status: spent_total = 1000 (settled at flush)');
 
-  const r2 = await call('pay', { url: premium.url });
-  check(!r2.isError && r2.data.paid === true && r2.data.result?.ticker === 'NVDA' && r2.data.charged === '5000', 'pay /premium-quote → paid 5000, got quote');
+  const r2 = await call('pay', { url: code.url });
+  check(!r2.isError && r2.data.paid === true && r2.data.result?.language === 'python' && r2.data.charged === '3000', 'pay /code_interpreter → paid 3000, got result');
   const b2 = await call('budget_status');
-  check(b2.data.spent === '6000', 'spent_total now 6000 (1000 + 5000)');
+  check(b2.data.spent === '4000', 'spent_total now 4000 (1000 + 3000)');
 
   console.log('\n• E: paywall is real (unpaid direct fetch rejected)');
-  const raw = await fetch(weather.url);
+  const raw = await fetch(search.url);
   check(raw.status === 402, 'direct GET with no X-PAYMENT → 402 (PoP/payment enforced)');
 
   await client.close();

@@ -40,6 +40,10 @@ export interface GatewayClient {
   // ---- public, address-keyed relationship reads (no api-key) ----
   plansByMerchant(merchant: string): Promise<PlanRowJson[]>;
   mandatesBySubscriber(subscriber: string): Promise<MandateRowJson[]>;
+  /** Like `mandatesBySubscriber`, but reconciles against chain first (scans `MandateAuthorized`
+   *  events + ingests any missing) so the subscriber's COMPLETE set comes back — including mandates
+   *  authorized outside iSub's surfaces. Slower (a chain event scan); use on load, not every poll. */
+  discoverMandatesBySubscriber(subscriber: string): Promise<MandateRowJson[]>;
   mandatesByPlan(planId: string): Promise<MandateRowJson[]>;
   accountsByOwner(owner: string): Promise<AccountRowJson[]>;
   // ---- per-mandate usage chart (public, by mandate id) ----
@@ -60,13 +64,25 @@ export interface GatewayConfig {
   apiKey?: string;
 }
 
-/** Gateway base URL — `NEXT_PUBLIC_GATEWAY_URL` at build, else a local dev default. */
+/** Gateway base URL — `NEXT_PUBLIC_GATEWAY_URL` (default `/gw`, Next's same-origin proxy to the gateway). */
 export const GATEWAY_URL =
-  (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_GATEWAY_URL) || 'http://localhost:4000';
+  (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_GATEWAY_URL) || '/gw';
 
 /** The default gateway client the dashboards use (public routes, no api-key). */
 export function webGateway(): GatewayClient {
   return gatewayClient({ baseUrl: GATEWAY_URL });
+}
+
+/**
+ * Gateway compliance-report URL for a party (subscriber = payments made, merchant = payments
+ * received). Defaults to the current month, CSV. Pass `month: 'YYYY-MM'` for a past month or
+ * `format: 'json'` for the structured report. The endpoint sets a Content-Disposition filename.
+ */
+export function reportUrl(party: 'subscriber' | 'merchant', address: string, opts?: { month?: string; format?: 'csv' | 'json' }): string {
+  const q = new URLSearchParams({ [party]: address });
+  if (opts?.month) q.set('month', opts.month);
+  if (opts?.format === 'json') q.set('format', 'json');
+  return `${GATEWAY_URL}/report?${q.toString()}`;
 }
 
 export function gatewayClient(cfg: GatewayConfig): GatewayClient {
@@ -92,6 +108,7 @@ export function gatewayClient(cfg: GatewayConfig): GatewayClient {
     },
     plansByMerchant: (merchant) => getJson<PlanRowJson[]>(`/relations/plans?merchant=${encodeURIComponent(merchant)}`),
     mandatesBySubscriber: (subscriber) => getJson<MandateRowJson[]>(`/relations/mandates?subscriber=${encodeURIComponent(subscriber)}`),
+    discoverMandatesBySubscriber: (subscriber) => getJson<MandateRowJson[]>(`/relations/mandates?subscriber=${encodeURIComponent(subscriber)}&discover=1`),
     mandatesByPlan: (planId) => getJson<MandateRowJson[]>(`/relations/mandates?plan=${encodeURIComponent(planId)}`),
     accountsByOwner: (owner) => getJson<AccountRowJson[]>(`/relations/accounts?owner=${encodeURIComponent(owner)}`),
     usage: (mandateId) => getJson<UsagePointJson[]>(`/usage?mandateId=${encodeURIComponent(mandateId)}`),

@@ -17,8 +17,9 @@ const ASSET = '0xdemo::usdc::USDC'; // demo asset label (USDC stand-in)
 const MANDATE_ID = 'M_demo';
 
 const APIS: PaidApi[] = [
-  { path: '/weather', price: 1_000n, label: 'Weather forecast (per call)', run: () => ({ location: 'Tokyo, JP', tempC: 26, forecast: 'humid & warm' }) },
-  { path: '/premium-quote', price: 5_000n, label: 'Premium stock quote (per call)', run: () => ({ ticker: 'NVDA', price: 1234.5, source: 'demo-feed' }) },
+  { path: '/web_search', price: 1_000n, label: 'Web Search MCP (per call)', run: () => ({ query: 'Sui Overflow 2026', results: [{ title: 'Sui Overflow 2026', url: 'https://sui.io/overflow' }], source: 'cortex-web' }) },
+  { path: '/code_interpreter', price: 3_000n, label: 'Code Interpreter MCP (per call)', run: () => ({ language: 'python', stdout: 'hello from the Cortex sandbox\n', exitCode: 0 }) },
+  { path: '/vision', price: 5_000n, label: 'Vision MCP (per call)', run: () => ({ caption: 'a butterfly resting on a pink flower', objects: ['butterfly', 'flower'], source: 'cortex-vision' }) },
 ];
 
 function mk(id: string, subscriber: string, merchant: string): MandateState {

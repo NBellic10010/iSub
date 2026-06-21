@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cortex AI — MCP services & token packages</title>
+    <style>
+      * { box-sizing: border-box; }
+      :root {
+        --bg: #060912; --panel: #0e1422; --panel2: #111a2c; --line: #1e2a40; --fg: #eaf1fb; --muted: #8a9bb5;
+        --cyan: #22d3ee; --violet: #818cf8; --ok: #34d399;
+      }
+      body { margin: 0; background: radial-gradient(1100px 520px at 80% -15%, #10233a 0%, var(--bg) 55%); color: var(--fg);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.5; }
+      .wrap { max-width: 1000px; margin: 0 auto; padding: 30px 22px 70px; }
+      .nav { display: flex; align-items: center; justify-content: space-between; }
+      .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
+      .brand .mark { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, var(--cyan), var(--violet)); display: grid; place-items: center; color: #04121c; font-weight: 900; }
+      .nav .pill { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; }
+
+      .hero { margin: 30px 0 26px; }
+      .hero h1 { font-size: 32px; line-height: 1.15; letter-spacing: -0.03em; margin: 0 0 8px; max-width: 18ch;
+        background: linear-gradient(120deg, #fff 30%, var(--cyan)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+      .hero p { color: var(--muted); font-size: 16px; max-width: 56ch; margin: 0; }
+
+      .sec { margin-top: 34px; }
+      .sec .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+      .sec .head h2 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+      .tag { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: .04em; }
+      .tag.payg { background: #0c3a44; color: var(--cyan); } .tag.fixed { background: #1e2150; color: var(--violet); }
+
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+      @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+      .card { position: relative; border: 1px solid var(--line); border-radius: 16px; padding: 18px; background: linear-gradient(180deg, var(--panel2), var(--panel)); display: flex; flex-direction: column; }
+      .card.pop { border-color: #3a3f7a; box-shadow: 0 0 0 1px #3a3f7a, 0 16px 40px #818cf820; }
+      .card.active { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok); }
+      .badge-pop { position: absolute; top: -10px; right: 14px; font-size: 10.5px; font-weight: 800; background: linear-gradient(135deg, var(--cyan), var(--violet)); color: #04121c; padding: 3px 9px; border-radius: 999px; }
+      .card .ic { font-size: 24px; } .card h3 { margin: 8px 0 2px; font-size: 16.5px; }
+      .card .desc { color: var(--muted); font-size: 13px; min-height: 36px; }
+      .card .price { margin: 12px 0 4px; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+      .card .price small { font-size: 13px; font-weight: 500; color: var(--muted); }
+      .card ul { list-style: none; padding: 0; margin: 8px 0 14px; color: #c4d2e6; font-size: 13px; }
+      .card ul li { padding: 3px 0; display: flex; gap: 8px; } .card ul li::before { content: "✓"; color: var(--cyan); }
+      .spacer { flex: 1; }
+      .btn { width: 100%; padding: 11px 14px; border: 0; border-radius: 11px; font: inherit; font-size: 14.5px; font-weight: 700; cursor: pointer;
+        background: linear-gradient(135deg, var(--cyan), var(--violet)); color: #04121c; display: flex; align-items: center; justify-content: center; gap: 8px; }
+      .status { min-height: 18px; margin-top: 9px; font-size: 12.5px; text-align: center; color: var(--muted); }
+      .status.ok { color: var(--ok); } .status.err { color: #fb7185; }
+      .mono { font-family: ui-monospace, SFMono-Regular, monospace; }
+      .foot { margin-top: 30px; color: var(--muted); font-size: 12.5px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="nav">
+        <div class="brand"><span class="mark">◆</span> Cortex AI</div>
+        <span class="pill">◈ Pay with Sui · non-custodial</span>
+      </div>
+
+      <div class="hero">
+        <h1>MCP tools &amp; tokens for autonomous agents</h1>
+        <p>Plug your agent into Cortex over MCP. Pay metered per call, or grab a recurring token package — every charge is pulled on-chain within a cap you sign. No card, no lock-in, cancel anytime.</p>
+      </div>
+
+      <!-- ===== MCP services (PAYG, per call) ===== -->
+      <div class="sec">
+        <div class="head"><h2>MCP services</h2><span class="tag payg">Pay-as-you-go · per call</span></div>
+        <div class="grid">
+          <div class="card">
+            <div class="ic">🔎</div>
+            <h3>Web Search MCP</h3>
+            <div class="desc">Live web + news retrieval with citations, exposed as MCP tools.</div>
+            <div class="price">0.001 SUI <small>/ call</small></div>
+            <div class="spacer"></div>
+            <button class="btn" data-plan="0x6ff9664b6435bdeef6e24e7fdbb5caa296fab1194550b767eac8e428870825c3" data-budget="0.3">◈ Subscribe with Sui</button>
+            <div class="status"></div>
+          </div>
+          <div class="card">
+            <div class="ic">🧮</div>
+            <h3>Code Interpreter MCP</h3>
+            <div class="desc">Sandboxed Python/JS execution + file I/O for your agent.</div>
+            <div class="price">0.003 SUI <small>/ call</small></div>
+            <div class="spacer"></div>
+            <button class="btn" data-plan="0x6ff9664b6435bdeef6e24e7fdbb5caa296fab1194550b767eac8e428870825c3" data-budget="0.3">◈ Subscribe with Sui</button>
+            <div class="status"></div>
+          </div>
+          <div class="card">
+            <div class="ic">👁️</div>
+            <h3>Vision MCP</h3>
+            <div class="desc">Image understanding, OCR &amp; document parsing tools.</div>
+            <div class="price">0.005 SUI <small>/ call</small></div>
+            <div class="spacer"></div>
+            <button class="btn" data-plan="0x6ff9664b6435bdeef6e24e7fdbb5caa296fab1194550b767eac8e428870825c3" data-budget="0.3">◈ Subscribe with Sui</button>
+            <div class="status"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Token packages (FIXED, monthly) ===== -->
+      <div class="sec">
+        <div class="head"><h2>Token packages</h2><span class="tag fixed">Fixed · recurring · 10s demo</span></div>
+        <div class="grid">
+          <div class="card">
+            <div class="ic">🌱</div>
+            <h3>Starter</h3>
+            <div class="desc">For prototypes and side-projects.</div>
+            <div class="price">0.01 SUI <small>/ 10s · cap 0.1</small></div>
+            <ul><li>1M tokens / cycle</li><li>Shared rate limit</li><li>Community support</li></ul>
+            <div class="spacer"></div>
+            <button class="btn" data-plan="0x668e274662244ff238a76e812a50ce765fc5d6a494e3e2edc7db99b5647a3853" data-budget="0.1">◈ Subscribe with Sui</button>
+            <div class="status"></div>
+          </div>
+          <div class="card pop">
+            <span class="badge-pop">MOST POPULAR</span>
+            <div class="ic">⚡</div>
+            <h3>Pro</h3>
+            <div class="desc">For production agents at scale.</div>
+            <div class="price">0.01 SUI <small>/ 10s · cap 0.5</small></div>
+            <ul><li>5M tokens / cycle</li><li>Priority rate limit</li><li>All MCP tools included</li></ul>
+            <div class="spacer"></div>
+            <button class="btn" data-plan="0x668e274662244ff238a76e812a50ce765fc5d6a494e3e2edc7db99b5647a3853" data-budget="0.5">◈ Subscribe with Sui</button>
+            <div class="status"></div>
+          </div>
+          <div class="card">
+            <div class="ic">🚀</div>
+            <h3>Scale</h3>
+            <div class="desc">For agent fleets &amp; high throughput.</div>
+            <div class="price">0.01 SUI <small>/ 10s · cap 1.0</small></div>
+            <ul><li>20M tokens / cycle</li><li>Dedicated capacity</li><li>SLA + priority support</li></ul>
+            <div class="spacer"></div>
+            <button class="btn" data-plan="0x668e274662244ff238a76e812a50ce765fc5d6a494e3e2edc7db99b5647a3853" data-budget="1.0">◈ Subscribe with Sui</button>
+            <div class="status"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="foot">Powered by iSub — the exact terms you authorize are read on-chain at checkout (trusted display). Cortex can only pull within the cap you sign; funds stay in your wallet.</div>
+    </div>
+    <script type="module" src="/src/cortex.ts"></script>
+  </body>
+</html>

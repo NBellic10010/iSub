@@ -10,9 +10,11 @@
 // managed-integration-plan.md.)
 //
 // Server-only (node:http + node:sqlite) — import `@isub/sdk/gateway`.
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { createServer as createHttpServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
+import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https';
 import type { Db } from './db';
 import { merchantByApiKey, sqlBillerStore, usageByMandate, chargesByMandate } from './sql-store';
+import { buildComplianceReport, reportToCsv, monthRangeFromLabel, currentMonthUtc } from './compliance';
 import { IsubService, type ServicePolicy, type UseResult } from './service';
 import { proofFromFields, type CallProof } from './agent-auth';
 import type { BillerChain, BillerEvent } from './biller';
@@ -59,6 +61,18 @@ export interface GatewayOptions {
    * — server-to-server callers (the thin client on a backend, curl) ignore it entirely.
    */
   corsOrigin?: string;
+  /** Network label for the compliance report (`/report`) — sets its `network` field + the suiscan
+   *  explorer base for per-charge audit links (e.g. 'testnet' | 'mainnet'). Omit → no explorer column. */
+  network?: string;
+  /** Fullnode base URL (the one that serves JSON-RPC — same as the gRPC base) + the iSub package id.
+   *  Both enable on-chain mandate DISCOVERY for `/relations/mandates?subscriber=…&discover=1`, which
+   *  scans `MandateAuthorized` events to complete the index for a subscriber. Omit either → the
+   *  `discover` flag is ignored and the route serves a plain (possibly incomplete) index read. */
+  rpcUrl?: string;
+  packageId?: string;
+  /** TLS key+cert (PEM). When set, `listen()` serves HTTPS — needed so an HTTPS browser dashboard can
+   *  call it without a mixed-content block. Omit → plain HTTP (fine for curl / server-to-server). */
+  tls?: { key: string | Buffer; cert: string | Buffer };
 }
 
 export class IsubGateway {
@@ -128,8 +142,9 @@ export class IsubGateway {
 
   // ===== HTTP front =====
 
-  listen(port: number): Server {
-    const server = createServer((req, res) => void this.handle(req, res));
+  listen(port: number): HttpServer | HttpsServer {
+    const handler = (req: IncomingMessage, res: ServerResponse): void => void this.handle(req, res);
+    const server = this.o.tls ? createHttpsServer(this.o.tls, handler) : createHttpServer(handler);
     server.listen(port);
     return server;
   }
@@ -232,7 +247,19 @@ export class IsubGateway {
         // the index only makes them queryable). Address-keyed — for the wallet-based subscriber portal.
         if (req.method === 'GET' && pathname === '/relations/mandates') {
           if (query.plan) return jsonBig(res, 200, index.mandatesByPlan(query.plan));
-          if (query.subscriber) return jsonBig(res, 200, index.mandatesBySubscriber(query.subscriber));
+          if (query.subscriber) {
+            // ?discover=1 → reconcile against chain first (find + ingest mandates the index missed),
+            // so the subscriber portal lists their COMPLETE set. Needs rpcUrl + packageId; without
+            // them (or if the event scan fails) fall back to the plain index read.
+            if (query.discover && this.o.rpcUrl && this.o.packageId) {
+              try {
+                return jsonBig(res, 200, await index.discoverMandatesBySubscriber(query.subscriber, { rpcUrl: this.o.rpcUrl, packageId: this.o.packageId }));
+              } catch {
+                /* RPC unreachable / scan failed — degrade to the cached index view below */
+              }
+            }
+            return jsonBig(res, 200, index.mandatesBySubscriber(query.subscriber));
+          }
           if (query.merchant) return jsonBig(res, 200, index.mandatesByMerchant(query.merchant));
           return json(res, 400, { reason: 'need one of ?plan= | ?subscriber= | ?merchant=' });
         }
@@ -253,6 +280,46 @@ export class IsubGateway {
         if (req.method === 'GET' && pathname === '/charges') {
           if (!query.mandateId) return json(res, 400, { reason: 'need ?mandateId=' });
           return jsonBig(res, 200, chargesByMandate(this.o.db, query.mandateId));
+        }
+
+        // monthly compliance / reconciliation report — CSV (default) or JSON, current month unless
+        // ?month=YYYY-MM. Public (it only aggregates on-chain-public charges, like the reads above).
+        //   GET /report?subscriber=<addr>            → "payments I made" (CSV download)
+        //   GET /report?merchant=<addr>&month=2026-05 → "payments I received" for May
+        //   …&format=json                            → the structured report
+        if (req.method === 'GET' && pathname === '/report') {
+          const party = query.subscriber ? ('subscriber' as const) : query.merchant ? ('merchant' as const) : null;
+          const address = query.subscriber ?? query.merchant;
+          if (!party || !address) return json(res, 400, { reason: 'need ?subscriber=<addr> or ?merchant=<addr> (optional &month=YYYY-MM, &format=json)' });
+          let range: { startMs: number; endMs: number; label: string };
+          try {
+            range = query.month ? monthRangeFromLabel(query.month) : currentMonthUtc();
+          } catch (e) {
+            return json(res, 400, { reason: e instanceof Error ? e.message : 'bad month' });
+          }
+          const mandates = party === 'subscriber' ? index.mandatesBySubscriber(address) : index.mandatesByMerchant(address);
+          const charges = mandates.flatMap((m) =>
+            chargesByMandate(this.o.db, m.mandateId).map((c) => ({ mandateId: m.mandateId, amount: c.amount, seq: c.seq, digest: c.digest, atMs: c.atMs })),
+          );
+          const report = buildComplianceReport({
+            party,
+            address,
+            asset: '0x2::sui::SUI',
+            network: this.o.network,
+            periodStartMs: range.startMs,
+            periodEndMs: range.endMs,
+            periodLabel: range.label,
+            generatedAtMs: Date.now(),
+            mandates: mandates.map((m) => ({ mandateId: m.mandateId, merchant: m.merchant, subscriber: m.subscriber, planId: m.planId })),
+            charges,
+          });
+          if (query.format === 'json') return jsonBig(res, 200, report);
+          const csv = reportToCsv(report, { explorerTxBase: this.o.network ? `https://suiscan.xyz/${this.o.network}/tx/` : undefined });
+          res.statusCode = 200;
+          res.setHeader('content-type', 'text/csv; charset=utf-8');
+          res.setHeader('content-disposition', `attachment; filename="isub-${party}-${address.slice(0, 10)}-${range.label}.csv"`);
+          res.end(csv);
+          return;
         }
       }
 

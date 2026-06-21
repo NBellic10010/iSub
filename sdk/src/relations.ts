@@ -10,8 +10,10 @@
 // SOURCE = write-time capture (NOT polling): the moment iSub creates a plan/mandate through its
 // own surfaces (checkout, merchant-plans, the gateway), it ingests the id here. Every ingest
 // RE-DERIVES the row from a chain point-read (getPlan/getMandate/getAccount) — so each row is
-// chain-truth, never trusted from the caller. (A later event-tail backstop can reconcile objects
-// created outside our surfaces; it is deliberately NOT built here — see product-plan/indexer-plan.md.)
+// chain-truth, never trusted from the caller. For mandates created OUTSIDE our surfaces (another
+// device, a script), `discoverMandatesBySubscriber()` reconciles on demand: it scans the
+// subscriber's `MandateAuthorized` events (see ./discovery) and ingests any the index is missing,
+// so the subscriber portal can list ALL of a wallet's subscriptions, not just the ones we captured.
 //
 // INVARIANTS: this is a READ-ONLY projection. It is NOT in the billing hot path and the
 // keeper/biller never read it (the "no event query on the hot path" rule stays intact). Its
@@ -21,6 +23,7 @@
 // Server-only (node:sqlite). Construct with any chain that can point-read — `IsubClient` fits.
 import type { Db } from './db';
 import type { PlanState, MandateState, AccountState } from './types';
+import { findMandateIdsBySubscriber } from './discovery';
 
 /** The chain point-reads the index needs. `IsubClient` satisfies this structurally. */
 export interface RelationChain {
@@ -140,6 +143,26 @@ export class IsubIndex {
   /** A subscriber's mandates ACROSS ALL merchants — the cross-merchant view gRPC cannot build. */
   mandatesBySubscriber(subscriber: string): MandateRow[] {
     return (this.db.prepare(`SELECT * FROM idx_mandates WHERE subscriber = ? ORDER BY updated_at DESC`).all(subscriber) as unknown as DbMandate[]).map(mandateRow);
+  }
+  /**
+   * Like {@link mandatesBySubscriber}, but first RECONCILES the index against chain so the result is
+   * the subscriber's COMPLETE set — including mandates authorized outside iSub's surfaces that were
+   * never ingested. Scans `MandateAuthorized` events (via ./discovery), then ingests any ids the
+   * index is missing (each ingest re-derives the row from a chain point-read; closed/unreadable ones
+   * are skipped). Falls back to the plain index read if the event scan fails (RPC down).
+   */
+  async discoverMandatesBySubscriber(subscriber: string, opts: { rpcUrl: string; packageId: string }): Promise<MandateRow[]> {
+    const ids = await findMandateIdsBySubscriber({ rpcUrl: opts.rpcUrl, packageId: opts.packageId, subscriber });
+    const known = new Set(this.mandatesBySubscriber(subscriber).map((m) => m.mandateId));
+    for (const id of ids) {
+      if (known.has(id)) continue;
+      try {
+        await this.ingestMandate(id);
+      } catch {
+        /* deleted / closed / not-yet-finalized — leave it out, it can't be read anyway */
+      }
+    }
+    return this.mandatesBySubscriber(subscriber);
   }
   /** The plan↔user mapping: every mandate (subscriber) on a plan. */
   mandatesByPlan(planId: string): MandateRow[] {

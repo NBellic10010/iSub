@@ -201,7 +201,13 @@ function migrate(db: Db): void {
 export function openDb(path = ':memory:'): Db {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON;');
-  if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL;'); // crash-safe + concurrent reads
+  if (path !== ':memory:') {
+    db.exec('PRAGMA journal_mode = WAL;'); // crash-safe + concurrent reads
+    // node:sqlite defaults to a 0ms busy handler → a writer that finds the single WAL write-lock held
+    // throws SQLITE_BUSY immediately. With co-tenant writers on one file (gateway + keeper + payg-biller),
+    // wait out brief overlap instead of dropping the write.
+    db.exec('PRAGMA busy_timeout = 5000;');
+  }
   db.exec(SCHEMA);
   migrate(db); // additive columns for existing DBs (no-op on fresh ones); run before any prepare
   return db;

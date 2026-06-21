@@ -21,8 +21,9 @@ const BUDGET = (5n * SUI) / 100n; // 0.05 SUI lifetime cap
 const DEPOSIT = (8n * SUI) / 100n; // 0.08 SUI funded into the Account
 const WINDOW_MS = 3_600_000n; // big window → rate cap doesn't bite the demo
 const PRICES = [
-  { path: '/weather', price: (SUI / 1000n).toString(), label: 'Weather forecast (per call)' }, // 0.001 SUI
-  { path: '/premium-quote', price: ((5n * SUI) / 1000n).toString(), label: 'Premium stock quote (per call)' }, // 0.005 SUI
+  { path: '/web_search', price: (SUI / 1000n).toString(), label: 'Web Search MCP (per call)' }, // 0.001 SUI
+  { path: '/code_interpreter', price: ((3n * SUI) / 1000n).toString(), label: 'Code Interpreter MCP (per call)' }, // 0.003 SUI
+  { path: '/vision', price: ((5n * SUI) / 1000n).toString(), label: 'Vision MCP (per call)' }, // 0.005 SUI
 ];
 
 async function fundFromMerchant(client: ReturnType<typeof clientFor>, merchantKp: Ed25519Keypair, to: string, amount: bigint, label: string): Promise<void> {
