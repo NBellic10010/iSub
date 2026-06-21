@@ -70,6 +70,7 @@
     "isub:claude:token": "ISUB_TOKEN_AGENT=1 ISUB_NETWORK=testnet tsx scripts/isub-claude.ts",
     "token:smoke": "ISUB_NETWORK=testnet tsx scripts/token-agent-smoke.ts",
     "bill": "ISUB_NETWORK=testnet NODE_OPTIONS=--experimental-sqlite tsx scripts/bill.ts",
+    "backend": "ISUB_NETWORK=testnet NODE_OPTIONS=--experimental-sqlite tsx scripts/backend.ts",
     "x402-testnet:setup": "ISUB_NETWORK=testnet NODE_OPTIONS=--experimental-sqlite tsx scripts/x402-testnet-setup.ts",
     "x402-testnet:smoke": "ISUB_NETWORK=testnet NODE_OPTIONS=--experimental-sqlite tsx scripts/x402-testnet-smoke.ts",
     "isub:claude:testnet": "ISUB_X402_TESTNET=1 ISUB_NETWORK=testnet NODE_OPTIONS=--experimental-sqlite tsx scripts/isub-claude.ts",

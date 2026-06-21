@@ -1,0 +1,18 @@
+# iSub all-in-one backend (gateway HTTP + FIXED keeper + PAYG auto-bill, one process, one sqlite).
+# Node 22 (node:sqlite). Build context = repo root.
+#   Railway: new service → Dockerfile path = Dockerfile.backend
+#     Variables:  ISUB_NETWORK=testnet
+#     SECRET:     ISUB_KEEPER_KEY = <bech32 suiprivkey of the plans' authorized keeper>  (NEVER commit)
+#     Volume:     mount at /app/sdk  +  ISUB_INDEX_DB=/app/sdk/isub-index.testnet.db  (persist charges)
+#   The keeper must be FUNDED with testnet gas. Charges fire only for mandates keyed to THIS keeper.
+FROM node:22-slim
+WORKDIR /app
+COPY package.json package-lock.json* ./
+COPY web/package.json web/
+COPY sdk/package.json sdk/
+COPY checkout/package.json checkout/
+RUN npm install
+COPY . .
+ENV ISUB_NETWORK=testnet
+EXPOSE 4100
+CMD ["sh", "-c", "PORT=${PORT:-4100} npm run backend -w @isub/sdk"]
