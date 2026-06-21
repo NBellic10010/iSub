@@ -19,7 +19,8 @@
     "./gateway": "./src/gateway.ts",
     "./relations": "./src/relations.ts",
     "./client": "./src/client-sdk.ts",
-    "./mcp": "./src/mcp.ts"
+    "./mcp": "./src/mcp.ts",
+    "./x402": "./src/x402.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -56,6 +57,9 @@
     "per-route-auth:smoke": "tsx scripts/per-route-auth-smoke.ts",
     "x402-agent:serve": "tsx scripts/isub-x402-agent.ts",
     "isub:claude": "tsx scripts/isub-claude.ts",
+    "x402-testnet:setup": "ISUB_NETWORK=testnet NODE_OPTIONS=--experimental-sqlite tsx scripts/x402-testnet-setup.ts",
+    "x402-testnet:smoke": "ISUB_NETWORK=testnet NODE_OPTIONS=--experimental-sqlite tsx scripts/x402-testnet-smoke.ts",
+    "isub:claude:testnet": "ISUB_X402_TESTNET=1 ISUB_NETWORK=testnet NODE_OPTIONS=--experimental-sqlite tsx scripts/isub-claude.ts",
     "wiring:e2e": "tsx scripts/wiring-e2e.ts",
     "wiring-e2e:testnet": "ISUB_NETWORK=testnet tsx scripts/wiring-e2e.ts",
     "managed-e2e": "NODE_OPTIONS=--experimental-sqlite tsx scripts/managed-e2e.ts",

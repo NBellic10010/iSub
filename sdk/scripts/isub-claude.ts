@@ -9,8 +9,14 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const serverScript = join(here, 'isub-x402-agent.ts');
 
+// In testnet mode, pass the MCP server the env it needs (real-chain flag, sqlite, network) explicitly
+// via the mcp-config so it's independent of how Claude propagates env to spawned servers.
+const testnet = process.env.ISUB_X402_TESTNET === '1';
+const env = testnet
+  ? { ISUB_X402_TESTNET: '1', NODE_OPTIONS: '--experimental-sqlite', ISUB_NETWORK: process.env.ISUB_NETWORK ?? 'testnet' }
+  : undefined;
 const mcpConfig = JSON.stringify({
-  mcpServers: { isub: { command: 'npx', args: ['tsx', serverScript] } },
+  mcpServers: { isub: { command: 'npx', args: ['tsx', serverScript], ...(env ? { env } : {}) } },
 });
 const ALLOWED = 'mcp__isub__list_paid_apis,mcp__isub__pay,mcp__isub__budget_status';
 

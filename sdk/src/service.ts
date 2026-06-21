@@ -265,7 +265,7 @@ export class IsubService {
   }
 
   /** Settle now (all mandates with un-settled usage). Exposed for tests / manual flush. */
-  flush(mandateId?: string): Promise<unknown> {
+  flush(mandateId?: string): Promise<import('./biller').FlushResult[]> {
     return this.biller.flush(mandateId);
   }
 

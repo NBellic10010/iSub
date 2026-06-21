@@ -5,14 +5,17 @@
 // stdout is the MCP JSON-RPC channel — all logs go to stderr (via demo.log / console.error).
 // Launch through Claude CLI with: npm run isub:claude   (see scripts/isub-claude.ts)
 import { serveStdio } from '../src/mcp';
-import { setupX402Demo } from './x402-agent-setup';
 
 async function main(): Promise<void> {
-  const demo = await setupX402Demo();
+  // ISUB_X402_TESTNET=1 → real on-chain settlement (loads scripts/.x402-testnet.json); else mock chain.
+  const testnet = process.env.ISUB_X402_TESTNET === '1';
+  const demo = testnet
+    ? await (await import('./x402-testnet-agent-setup')).setupX402Testnet()
+    : await (await import('./x402-agent-setup')).setupX402Demo();
   const port = Number(process.env.ISUB_X402_PORT ?? 4021);
   const { url } = await demo.startSeller(port);
-  demo.log(`demo x402 seller on ${url}  (paid endpoints: /weather, /premium-quote)`);
-  demo.log(`mandate ${demo.mandateId} · agent ${demo.agentAddress.slice(0, 12)}… · subscriber ${demo.subscriberAddress.slice(0, 12)}…`);
+  demo.log(`${testnet ? 'TESTNET (real on-chain)' : 'mock'} x402 seller on ${url}  (/weather, /premium-quote)`);
+  demo.log(`mandate ${demo.mandateId} · agent ${demo.agentAddress.slice(0, 12)}…`);
   await serveStdio({ name: 'isub-x402', version: '0.0.1', walletTools: demo.buildTools(url) });
   demo.log('MCP server ready on stdio — tools: list_paid_apis · pay · budget_status');
 }

@@ -198,7 +198,7 @@ export class MandateFacilitator {
 export type FetchLike = (
   url: string,
   init?: { method?: string; headers?: Record<string, string>; body?: string },
-) => Promise<{ status: number; ok: boolean; text: () => Promise<string> }>;
+) => Promise<{ status: number; ok: boolean; text: () => Promise<string>; headers?: { get: (name: string) => string | null } }>;
 
 export interface X402PayResult {
   status: number;
@@ -208,6 +208,8 @@ export interface X402PayResult {
   body: string;
   /** the mandate-scheme requirement that was satisfied (present only when paid). */
   requirements?: PaymentRequirements;
+  /** the seller's `X-PAYMENT-RESPONSE` (settlement receipt: digest/explorer/spent) if present. */
+  paymentResponse?: string;
 }
 
 /**
@@ -256,5 +258,12 @@ export async function payViaX402(
     headers: { ...baseHeaders, 'X-PAYMENT': encodePayment(payment) },
     body: opts.body,
   });
-  return { status: retried.status, ok: retried.ok, paid: true, body: await retried.text(), requirements };
+  return {
+    status: retried.status,
+    ok: retried.ok,
+    paid: true,
+    body: await retried.text(),
+    requirements,
+    paymentResponse: retried.headers?.get('x-payment-response') ?? undefined,
+  };
 }

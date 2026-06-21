@@ -18,3 +18,9 @@ logs/
 isub-index.*.db
 isub-index.*.db-shm
 isub-index.*.db-wal
+
+# x402 testnet demo: config holds the agent PRIVATE KEY — NEVER commit; + its biller sqlite
+scripts/.x402-testnet.json
+scripts/.x402-testnet.db
+scripts/.x402-testnet.db-shm
+scripts/.x402-testnet.db-wal
