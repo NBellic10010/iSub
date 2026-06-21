@@ -1,0 +1,17 @@
+# iSub gateway (off-chain relationship index + /usage, /charges, /report). Node 22 (uses node:sqlite via
+# --experimental-sqlite, set by the npm script). Build context = repo root.
+#   Railway: new service → Dockerfile path = Dockerfile.gateway → env ISUB_NETWORK=testnet (PORT auto).
+#   NOTE: the sqlite index is EPHEMERAL on Railway — attach a volume mounted at /app/sdk and set
+#   ISUB_INDEX_DB=/app/sdk/isub-index.testnet.db for persistence, else it repopulates as users subscribe.
+FROM node:22-slim
+WORKDIR /app
+COPY package.json package-lock.json* ./
+COPY web/package.json web/
+COPY sdk/package.json sdk/
+COPY checkout/package.json checkout/
+RUN npm install
+COPY . .
+ENV ISUB_NETWORK=testnet
+EXPOSE 4100
+# gateway:serve reads process.env.PORT and sets NODE_OPTIONS=--experimental-sqlite itself.
+CMD ["sh", "-c", "PORT=${PORT:-4100} npm run gateway:serve -w @isub/sdk"]

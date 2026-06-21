@@ -1,0 +1,21 @@
+# never ship deps/build artifacts (regenerated in the image) or SECRETS
+**/node_modules
+**/.next
+**/dist
+**/build
+**/.turbo
+docs/_book
+.git
+web/certificates
+# SECRETS — never copy into an image
+.secrets
+**/.secrets
+**/.keeper
+sdk/scripts/.x402-testnet.json
+sdk/scripts/.token-agent.json
+web/.env.local
+# local sqlite (regenerable; ephemeral on the host)
+**/*.db
+**/*.db-shm
+**/*.db-wal
+isub.localnet.json

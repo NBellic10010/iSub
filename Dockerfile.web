@@ -1,0 +1,22 @@
+# iSub web (Next.js dashboards + checkout). Build context = repo root (it's an npm-workspace monorepo;
+# @isub/web depends on the @isub/sdk workspace, which Next transpiles from source — so the WHOLE repo
+# must be installed together, not just web/).
+#   Railway: new service → Dockerfile path = Dockerfile.web → set env GATEWAY_ORIGIN (see RAILWAY.md).
+FROM node:22-slim AS build
+WORKDIR /app
+# install all workspaces (manifests first for layer caching)
+COPY package.json package-lock.json* ./
+COPY web/package.json web/
+COPY sdk/package.json sdk/
+COPY checkout/package.json checkout/
+RUN npm install
+COPY . .
+RUN npm run build -w @isub/web
+
+FROM node:22-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app /app
+EXPOSE 3000
+# Railway injects PORT; Next binds it on all interfaces.
+CMD ["sh", "-c", "npm run start -w @isub/web -- -p ${PORT:-3000} -H 0.0.0.0"]
