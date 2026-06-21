@@ -175,9 +175,11 @@ export class MandateFacilitator {
     if (payload.scheme !== ISUB_SCHEME) return { success: false, errorReason: 'scheme_mismatch' };
     const m = payload.payload;
     const proof = proofFromFields({ agentSig: m.sig, agentSigNotAfter: m.notAfter, agentCert: m.cert });
+    // x402 is the agent-facing route → ALWAYS enforce PoP, hard-coded here (never from the client
+    // payload). Same single IsubService/biller a merchant self-metering route uses with authMode 'off'.
     const r = m.items
-      ? await this.service.useMetered(m.mandateId, m.items.map((i) => ({ meterKey: i.meterKey, qty: BigInt(i.qty) })), m.usageId, proof)
-      : await this.service.use(m.mandateId, BigInt(m.amount ?? requirements.maxAmountRequired), m.usageId, proof);
+      ? await this.service.useMetered(m.mandateId, m.items.map((i) => ({ meterKey: i.meterKey, qty: BigInt(i.qty) })), m.usageId, proof, 'enforce')
+      : await this.service.use(m.mandateId, BigInt(m.amount ?? requirements.maxAmountRequired), m.usageId, proof, 'enforce');
     if (!r.ok) return { success: false, errorReason: `${r.status}${r.reason ? ' ' + r.reason : ''}` };
     return {
       success: true,
@@ -189,4 +191,70 @@ export class MandateFacilitator {
       txHash: null,
     };
   }
+}
+
+// ===== BUYER fetch loop (HTTP 402 round-trip) =====
+/** Minimal fetch shape — global `fetch` (Node 18+ / browser) satisfies it structurally. */
+export type FetchLike = (
+  url: string,
+  init?: { method?: string; headers?: Record<string, string>; body?: string },
+) => Promise<{ status: number; ok: boolean; text: () => Promise<string> }>;
+
+export interface X402PayResult {
+  status: number;
+  ok: boolean;
+  /** true if a 402 was answered with an X-PAYMENT and retried. */
+  paid: boolean;
+  body: string;
+  /** the mandate-scheme requirement that was satisfied (present only when paid). */
+  requirements?: PaymentRequirements;
+}
+
+/**
+ * Request `url`; if it answers 402 with a `mandate`-scheme challenge, present an X-PAYMENT (a PoP over
+ * the standing mandate — NO fresh transfer tx) and retry ONCE. This is the agent's buyer side of the
+ * loop; wrap it as an MCP `pay` tool so natural language ("access this paid API") triggers payment.
+ */
+export async function payViaX402(
+  fetchImpl: FetchLike,
+  url: string,
+  opts: {
+    mandateId: string;
+    agent: MessageSigner;
+    cert: AgentCert;
+    usageId: string;
+    method?: string;
+    body?: string;
+    headers?: Record<string, string>;
+    charge?: { items: ReadonlyArray<{ meterKey: string; qty: bigint }> };
+    nowMs?: bigint;
+  },
+): Promise<X402PayResult> {
+  const method = opts.method ?? 'GET';
+  const baseHeaders = { ...(opts.headers ?? {}) };
+  const first = await fetchImpl(url, { method, headers: baseHeaders, body: opts.body });
+  if (first.status !== 402) {
+    return { status: first.status, ok: first.ok, paid: false, body: await first.text() };
+  }
+  const challenge = JSON.parse(await first.text()) as PaymentRequiredBody;
+  const requirements = (challenge.accepts ?? []).find((a) => a.scheme === ISUB_SCHEME);
+  if (!requirements) {
+    const offered = (challenge.accepts ?? []).map((a) => a.scheme).join(', ') || 'none';
+    throw new Error(`x402: server offered no '${ISUB_SCHEME}' scheme (got: ${offered})`);
+  }
+  const payment = await createMandatePayment({
+    requirements,
+    mandateId: opts.mandateId,
+    usageId: opts.usageId,
+    agent: opts.agent,
+    cert: opts.cert,
+    charge: opts.charge,
+    nowMs: opts.nowMs,
+  });
+  const retried = await fetchImpl(url, {
+    method,
+    headers: { ...baseHeaders, 'X-PAYMENT': encodePayment(payment) },
+    body: opts.body,
+  });
+  return { status: retried.status, ok: retried.ok, paid: true, body: await retried.text(), requirements };
 }

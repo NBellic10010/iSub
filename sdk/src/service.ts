@@ -95,12 +95,17 @@ export class IsubService {
    * Agent-facing entry: present the mandate as the payment credential + report this call's
    * usage. Returns 200 (served), 402 (gated — out of budget / not serviceable), or 403 (the
    * mandate isn't a valid credential for this service).
+   *
+   * `authMode` is the per-ROUTE proof-of-possession policy, set by the TRUSTED server route — NOT
+   * from any client/agent payload (or an attacker could send 'off' to bypass). x402 / agent-facing
+   * adapters pass 'enforce'; a merchant self-metering its own logged-in users passes 'off'. Omit to
+   * fall back to the service default (`policy.agentAuth`). One service / one biller serves both.
    */
-  async use(mandateId: string, amount: bigint, usageId: string, proof?: CallProof): Promise<UseResult> {
+  async use(mandateId: string, amount: bigint, usageId: string, proof?: CallProof, authMode?: 'off' | 'warn' | 'enforce'): Promise<UseResult> {
     if (amount <= 0n) return { ok: false, status: 400, reason: 'amount must be positive' };
     const s = await this.session(mandateId);
     if (!s.serviceable) return { ok: false, status: s.reason === 'mandate not for this service' || s.reason === 'not a PAYG mandate' ? 403 : 402, reason: s.reason };
-    if (!(await this.authorizeCall(s, mandateId, usageId, payloadOf(undefined, amount), proof))) {
+    if (!(await this.authorizeCall(s, mandateId, usageId, payloadOf(undefined, amount), proof, authMode ?? this.agentAuth))) {
       return { ok: false, status: 403, reason: 'agent proof required or invalid (bearer mandateId rejected)' };
     }
     if (s.remaining < amount) return { ok: false, status: 402, reason: 'insufficient remaining budget for this request' };
@@ -129,6 +134,7 @@ export class IsubService {
     items: ReadonlyArray<{ meterKey: string; qty: bigint }>,
     usageId: string,
     proof?: CallProof,
+    authMode?: 'off' | 'warn' | 'enforce',
   ): Promise<UseResult> {
     if (!this.rateCard) return { ok: false, status: 500, reason: 'no rate card configured for this service' };
     let amount: bigint;
@@ -141,7 +147,7 @@ export class IsubService {
 
     const s = await this.session(mandateId);
     if (!s.serviceable) return { ok: false, status: s.reason === 'mandate not for this service' || s.reason === 'not a PAYG mandate' ? 403 : 402, reason: s.reason };
-    if (!(await this.authorizeCall(s, mandateId, usageId, payloadOf(items), proof))) {
+    if (!(await this.authorizeCall(s, mandateId, usageId, payloadOf(items), proof, authMode ?? this.agentAuth))) {
       return { ok: false, status: 403, reason: 'agent proof required or invalid (bearer mandateId rejected)' };
     }
     if (s.remaining < amount) return { ok: false, status: 402, reason: 'insufficient remaining budget for this request' };
@@ -169,10 +175,10 @@ export class IsubService {
    * → verify + log but allow; 'enforce' → only a valid proof passes. `payload` binds the signature to
    * THIS exact charge (amount or sorted meter items) so a captured signature can't be reused.
    */
-  private async authorizeCall(s: Session, mandateId: string, usageId: string, payload: string, proof?: CallProof): Promise<boolean> {
-    if (this.agentAuth === 'off') return true;
+  private async authorizeCall(s: Session, mandateId: string, usageId: string, payload: string, proof: CallProof | undefined, mode: 'off' | 'warn' | 'enforce'): Promise<boolean> {
+    if (mode === 'off') return true;
     if (await this.verifyProof(s, mandateId, usageId, payload, proof)) return true;
-    if (this.agentAuth === 'warn') {
+    if (mode === 'warn') {
       console.warn(`[isub] agent-auth WARN: missing/invalid proof on ${mandateId} (usage ${usageId}) — would be 403 in enforce mode`);
       return true;
     }

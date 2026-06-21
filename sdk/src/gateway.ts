@@ -29,6 +29,13 @@ export interface MerchantRouting {
   webhook?: { url: string; secret: string };
   /** Optional price list — enables raw-quantity metered reporting (`/usage-metered`) for this tenant. */
   rateCard?: RateCard;
+  /**
+   * Per-tenant proof-of-possession policy ('off' | 'warn' | 'enforce'), overriding the gateway-wide
+   * `policy.agentAuth`. Set 'enforce' for an agent-facing tenant whose callers must present a PoP;
+   * leave unset for a merchant self-metering its own users (the api-key already authenticates them).
+   * Lets ONE gateway serve human-off and agent-enforce tenants side by side, on one service each.
+   */
+  agentAuthMode?: 'off' | 'warn' | 'enforce';
 }
 
 export interface GatewayOptions {
@@ -71,7 +78,7 @@ export class IsubGateway {
       this.o.keeperSigner,
       r.payoutAddress,
       sqlBillerStore(this.o.db, merchantId),
-      this.o.policy,
+      r.agentAuthMode ? { ...this.o.policy, agentAuth: r.agentAuthMode } : this.o.policy,
       dispatcher ? (e: BillerEvent) => void dispatcher.enqueue(eventToWebhook(e)) : undefined,
       r.rateCard,
     );

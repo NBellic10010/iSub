@@ -34,7 +34,7 @@ import type { CallProof } from './agent-auth';
 
 /** The slice of `IsubService` a metered tool needs (IsubService satisfies this structurally). */
 export interface MeteredService {
-  use(mandateId: string, amount: bigint, usageId: string, proof?: CallProof): Promise<{ ok: boolean; status: number; reason?: string }>;
+  use(mandateId: string, amount: bigint, usageId: string, proof?: CallProof, authMode?: 'off' | 'warn' | 'enforce'): Promise<{ ok: boolean; status: number; reason?: string }>;
 }
 
 /** A real, paid per-call service exposed as one MCP tool. `mandateId`/`usageId` args are added for you. */
@@ -58,6 +58,12 @@ export interface IsubMcpOptions {
   metered?: MeteredToolDef[];
   /** Required when `metered` is non-empty — the runtime that settles the charges. */
   service?: MeteredService;
+  /**
+   * Per-ROUTE proof-of-possession policy for the metered tools ('off' | 'warn' | 'enforce'). MCP
+   * metered tools are agent-facing, so set 'enforce' to require an agent PoP on every call; omit to
+   * inherit the service default (`policy.agentAuth`). Set by the operator — never from tool args.
+   */
+  meteredAuthMode?: 'off' | 'warn' | 'enforce';
   name?: string;
   version?: string;
 }
@@ -88,12 +94,13 @@ function meteredSchema(def: MeteredToolDef): Record<string, unknown> {
 }
 
 /** Meter the call (gate on budget/credential/proof), then run the work only if payment is accepted. */
-async function runMetered(def: MeteredToolDef, service: MeteredService, args: Record<string, unknown>): Promise<CallToolResult> {
+async function runMetered(def: MeteredToolDef, service: MeteredService, args: Record<string, unknown>, authMode?: 'off' | 'warn' | 'enforce'): Promise<CallToolResult> {
   const mandateId = typeof args.mandateId === 'string' ? args.mandateId : '';
   if (!mandateId) return fail('missing mandateId — call `subscribe` first, then pass the returned mandate id here');
   const usageId = typeof args.usageId === 'string' && args.usageId ? args.usageId : `u_${randomUUID()}`;
 
-  const paid = await service.use(mandateId, def.price, usageId, proofFromFields(args));
+  // authMode is set by the operator (IsubMcpOptions.meteredAuthMode), NOT derived from tool args.
+  const paid = await service.use(mandateId, def.price, usageId, proofFromFields(args), authMode);
   if (!paid.ok) {
     // 402 = out of budget / not serviceable (top up or stop); 403 = bad credential / missing agent proof.
     return fail(`payment required (HTTP ${paid.status}): ${paid.reason ?? 'not serviceable'}`, { status: paid.status, usageId });
@@ -147,7 +154,7 @@ export function createIsubMcpServer(opts: IsubMcpOptions): Server {
     const m = metered.find((t) => t.name === name);
     if (m) {
       try {
-        return await runMetered(m, service!, args);
+        return await runMetered(m, service!, args, opts.meteredAuthMode);
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
       }
