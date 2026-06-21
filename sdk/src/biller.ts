@@ -30,6 +30,19 @@ const E_OVER_RATE_CAP = 8;
 const E_OVER_BUDGET = 9;
 const E_INSUFFICIENT = 10;
 const E_OVER_PER_CHARGE = 24;
+const E_NOT_BEFORE = 6; // EIntervalNotElapsed — PAYG charge attempted before not_before_ms (chain Clock)
+
+/**
+ * Clock-skew tolerance (ms) for the not_before pre-flight. `not_before_ms` is set from the CHAIN
+ * Clock at authorize, but `spendableNow` compares it to the LOCAL wall clock. Without slack, a
+ * sub-second local-behind-chain skew makes the FIRST charge of a no-delay mandate (where
+ * not_before ≈ authorize time) false-skip — spendable reads 0 and the charge silently carries
+ * instead of settling (observed on testnet: a flush ~1s after authorize dropped the first charge).
+ * The chain re-enforces not_before authoritatively, so erring a few seconds early is safe: for a
+ * no-delay mandate the chain always accepts (chain-now ≥ not_before post-authorize); only at a real
+ * future trial boundary could it abort #6, which settle() now treats as a non-fatal carry.
+ */
+const NOT_BEFORE_SKEW_MS = 5_000;
 
 export interface UsageRow {
   usageId: string;
@@ -139,7 +152,9 @@ async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: 
 export function spendableNow(m: MandateState, accountBalance: bigint, nowMs: number): bigint {
   const now = BigInt(nowMs);
   if (m.status !== MandateStatus.Active) return 0n;
-  if (now >= m.expiryMs || now < m.notBeforeMs) return 0n;
+  // not_before is in CHAIN time; we compare against the local clock → allow a skew tolerance so a
+  // sub-second local-behind-chain skew can't false-skip the first charge (the chain re-enforces it).
+  if (now >= m.expiryMs || now + BigInt(NOT_BEFORE_SKEW_MS) < m.notBeforeMs) return 0n;
   const budgetLeft = m.totalBudget > m.spentTotal ? m.totalBudget - m.spentTotal : 0n;
   const windowLeft = now >= m.windowStartMs + m.rateWindowMs ? m.rateCap : m.rateCap > m.windowSpent ? m.rateCap - m.windowSpent : 0n;
   return min(budgetLeft, windowLeft, m.maxPerCharge, accountBalance);
@@ -254,7 +269,22 @@ export class IsubBiller {
     const prev = this.inflight.get(mandateId) ?? Promise.resolve();
     const next = prev.catch(() => undefined).then(() => this.settle(mandateId, nowMs));
     this.inflight.set(mandateId, next);
+    // A3 (biller-special-review): drop the entry once this settle finishes, so a long-running biller
+    // covering many distinct mandates doesn't accumulate resolved Promises forever (each pins the
+    // settle closure → chain/store/signer). Guard on identity: only delete if we're still the chain
+    // tail (a newer flushOne may have already chained on us). The `.catch` swallows THIS branch only —
+    // the caller still receives `next` and handles its rejection; we must not raise a second, unhandled one.
+    void next
+      .finally(() => {
+        if (this.inflight.get(mandateId) === next) this.inflight.delete(mandateId);
+      })
+      .catch(() => {});
     return next;
+  }
+
+  /** Number of mandates with an in-flight (or just-chained) settle — for tests/observability. */
+  get inflightCount(): number {
+    return this.inflight.size;
   }
 
   private async settle(mandateId: string, nowMs: number): Promise<FlushResult> {
@@ -323,6 +353,13 @@ export class IsubBiller {
         if (code === E_INSUFFICIENT) {
           this.emitCarry(mandateId, carried, 'insufficient_balance', nowMs);
           return { mandateId, charged: totalCharged, carried, reason: 'insufficient_balance' };
+        }
+        if (code === E_NOT_BEFORE) {
+          // Charged just before not_before (a real future-trial boundary, within the skew window the
+          // pre-flight allows). Nothing landed; it's simply not chargeable YET — carry as NON-FATAL
+          // (keep serving the trial) and let the next window settle it. Not a charge.failed.
+          this.emitCarry(mandateId, carried, 'rate_limited', nowMs);
+          return { mandateId, charged: totalCharged, carried, reason: 'rate_limited' };
         }
         // EBadChargeSeq OR transient (non-abort): the charge MAY have landed. Don't re-derive a
         // fresh seq here — the next attempt's recoverOrphan resolves it from the chain seq.

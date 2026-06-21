@@ -2,12 +2,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ConnectButton } from '@mysten/dapp-kit-react/ui';
-import { MandateStatus, ChargeMode, errorName, abortCodeOf, accountExposure, type MandateState } from '@isub/sdk';
+import { MandateStatus, ChargeMode, errorName, abortCodeOf, accountExposure, type MandateState, type PlanState } from '@isub/sdk';
 import { useIsub } from '@/lib/use-isub';
-import { fmtSui, toMist, shortId } from '@/lib/format';
+import { fmtSui, toMist, shortId, DAY_MS } from '@/lib/format';
 import { Card, Metric, Badge, Button, AddressChip } from '@/components/ui';
 import { webGateway } from '@/lib/gateway';
 import { UsageChart } from '@/components/usage-chart';
+import { WalletUsageTable } from '@/components/wallet-usage-table';
 
 type Sub = { id: string; mandate: MandateState | null };
 type Exposure = Awaited<ReturnType<typeof accountExposure>>;
@@ -34,6 +35,12 @@ export default function SubscriberDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [chartFor, setChartFor] = useState<string | null>(null);
+  // Active subscribe-to-a-plan flow
+  const [planIdInput, setPlanIdInput] = useState('');
+  const [quotedPlan, setQuotedPlan] = useState<PlanState | null>(null);
+  const [subBudget, setSubBudget] = useState('0.2');
+  const [subMaxPerCharge, setSubMaxPerCharge] = useState('');
+  const [subTtlDays, setSubTtlDays] = useState('30');
 
   const refreshAccount = useCallback(
     async (id: string) => {
@@ -196,6 +203,60 @@ export default function SubscriberDashboard() {
       return `Now watching ${shortId(id)}`;
     });
 
+  // Read a plan's REAL terms from chain (same neutral read the checkout uses) before authorizing.
+  const doReview = () =>
+    run('Loading plan terms…', async () => {
+      const id = planIdInput.trim();
+      if (!id) return;
+      const p = await isub.quoteFromPlan(id);
+      setQuotedPlan(p);
+      setSubMaxPerCharge(p.mode === ChargeMode.Fixed ? '' : fmtSui(p.rateCap)); // PAYG: default per-charge cap = rate cap
+      return `Loaded terms for ${shortId(p.id)}`;
+    });
+
+  // Actively subscribe: authorize a capped, revocable mandate against the reviewed plan. Opens an
+  // account first if needed. Terms (price/rate/merchant/keeper) are bound from the chain-read plan,
+  // not from any merchant input — the same invariant the checkout enforces. Moves NO funds.
+  const doSubscribe = () =>
+    run('Subscribing…', async () => {
+      const p = quotedPlan;
+      if (!p) return;
+      let acct = accountId;
+      if (!acct) {
+        const { accountId: id } = await isub.openAccount(signer!);
+        localStorage.setItem(`${ns}:account`, id);
+        setAccountId(id);
+        try { await gw.ingestAccount(id); } catch { /* gateway down — discoverable later */ }
+        acct = id;
+      }
+      const budget = toMist(subBudget);
+      const expiryMs = BigInt(Date.now() + Math.max(1, Number(subTtlDays) || 0) * DAY_MS);
+      let mandateId: string;
+      if (p.mode === ChargeMode.Fixed) {
+        ({ mandateId } = await isub.authorizeFixed(signer!, {
+          accountId: acct, planId: p.id,
+          expectedPrice: p.price, expectedIntervalMs: p.intervalMs, expectedMerchant: p.merchant,
+          totalBudget: budget, expiryMs,
+        }));
+      } else {
+        ({ mandateId } = await isub.authorizeMetered(signer!, {
+          accountId: acct, planId: p.id,
+          expectedRateCap: p.rateCap, expectedRateWindowMs: p.rateWindowMs,
+          expectedMerchant: p.merchant, expectedKeeper: p.keeper,
+          totalBudget: budget, expiryMs,
+          maxPerCharge: subMaxPerCharge ? toMist(subMaxPerCharge) : p.rateCap,
+        }));
+      }
+      const ids = [...new Set([...mandateIds(), mandateId])];
+      localStorage.setItem(`${ns}:mandates`, JSON.stringify(ids));
+      try { await gw.ingestMandate(mandateId); } catch { /* gateway down — local only */ }
+      setQuotedPlan(null);
+      setPlanIdInput('');
+      await refreshSubs(acct, ids);
+      await refreshWallet();
+      return `Subscribed — mandate ${shortId(mandateId)}`;
+    });
+
   const doRevoke = (id: string) =>
     run('Cancelling…', async () => {
       await isub.revoke(signer!, { mandateId: id });
@@ -280,6 +341,75 @@ export default function SubscriberDashboard() {
               <Metric label="At risk" value={`${fmtSui(exposure.atRisk)} SUI`} hint={exposure.overAuthorized ? 'over-authorized' : 'within balance'} />
             </section>
           )}
+
+          <WalletUsageTable mandateIds={subs.map((s) => s.id)} />
+
+          <section className="card" style={{ marginBottom: 16 }}>
+            <h3 style={{ fontSize: 15, marginBottom: 4 }}>Subscribe to a plan</h3>
+            <p className="muted" style={{ fontSize: 12, margin: '0 0 12px' }}>
+              Paste a merchant’s plan id, review the on-chain terms, set your own caps, and authorize. Authorizing moves no
+              funds — funds stay in your wallet and you can cancel anytime.
+            </p>
+            <div className="row">
+              <input
+                className="input"
+                style={{ flex: 1, minWidth: 220, fontFamily: 'var(--mono)', fontSize: 13 }}
+                placeholder="plan id (0x…)"
+                value={planIdInput}
+                onChange={(e) => { setPlanIdInput(e.target.value); setQuotedPlan(null); }}
+                aria-label="plan id to subscribe to"
+              />
+              <Button onClick={doReview} disabled={!!busy || !planIdInput.trim()}>Review terms</Button>
+            </div>
+
+            {quotedPlan && (
+              <div style={{ borderTop: '0.5px solid var(--border)', marginTop: 12, paddingTop: 12 }}>
+                <div className="row" style={{ justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
+                  <span className="muted">mode</span>
+                  <span>{quotedPlan.mode === ChargeMode.Fixed ? 'Subscription (Fixed)' : 'Pay-as-you-go'}</span>
+                </div>
+                <div className="row" style={{ justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
+                  <span className="muted">{quotedPlan.mode === ChargeMode.Fixed ? 'price' : 'rate cap'}</span>
+                  <span className="mono">
+                    {quotedPlan.mode === ChargeMode.Fixed
+                      ? `${fmtSui(quotedPlan.price)} SUI / ${Number(quotedPlan.intervalMs) / 1000}s`
+                      : `${fmtSui(quotedPlan.rateCap)} SUI / ${Number(quotedPlan.rateWindowMs) / 1000}s window`}
+                  </span>
+                </div>
+                <div className="row" style={{ justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
+                  <span className="muted">to merchant</span>
+                  <AddressChip id={quotedPlan.merchant} />
+                </div>
+
+                <div className="row" style={{ marginTop: 10 }}>
+                  <label className="muted" style={{ fontSize: 12, width: 124 }}>Budget cap (SUI)</label>
+                  <input className="input" style={{ width: 120 }} value={subBudget} onChange={(e) => setSubBudget(e.target.value)} aria-label="total budget in SUI" />
+                </div>
+                {quotedPlan.mode !== ChargeMode.Fixed && (
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <label className="muted" style={{ fontSize: 12, width: 124 }}>Max per charge (SUI)</label>
+                    <input className="input" style={{ width: 120 }} value={subMaxPerCharge} onChange={(e) => setSubMaxPerCharge(e.target.value)} aria-label="max per charge in SUI" />
+                  </div>
+                )}
+                <div className="row" style={{ marginTop: 8 }}>
+                  <label className="muted" style={{ fontSize: 12, width: 124 }}>Expires in (days)</label>
+                  <input className="input" style={{ width: 120 }} value={subTtlDays} onChange={(e) => setSubTtlDays(e.target.value)} aria-label="expiry in days" />
+                </div>
+
+                <p style={{ fontSize: 12, color: 'var(--success)', margin: '12px 0' }}>✓ Authorizing moves no funds · cancel anytime</p>
+                <div className="row">
+                  <Button onClick={doSubscribe} disabled={!!busy} variant="primary">{busy ?? 'Subscribe'}</Button>
+                  <Button onClick={() => { setQuotedPlan(null); setPlanIdInput(''); }} disabled={!!busy}>Cancel</Button>
+                </div>
+                {!accountId && (
+                  <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>No iSub account yet — subscribing opens one for you. Deposit afterward so charges can settle.</p>
+                )}
+                {accountId && balance === 0n && (
+                  <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Tip: your iSub balance is 0 — deposit so the merchant’s charges can settle.</p>
+                )}
+              </div>
+            )}
+          </section>
 
           <section className="card">
             <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>

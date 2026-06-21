@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileStore } from '../src/store-file';
 import { memoryStore } from '../src/store';
-import { IsubKeeper, ChargeMode, MandateStatus, scheduleLag, priceUsage, priceUsageMulti, assertValidRateCard, assertRateCardFits, buildConsent, verifyConsentSignature, IsubAbortError, IsubError } from '../src/index';
+import { IsubKeeper, ChargeMode, MandateStatus, scheduleLag, priceUsage, priceUsageMulti, assertValidRateCard, assertRateCardFits, buildConsent, verifyConsentSignature, issueAgentCert, signCall, callMessage, payloadOf, verifyBinding, verifyCallProof, IsubAbortError, IsubError } from '../src/index';
 import type { IsubClient, IsubSigner, MandateState, RateCard, AuthorizeFixedArgs, AuthorizeMeteredArgs } from '../src/index';
 import { IsubAgent, type SpendPolicy } from '../src/agent';
 import { IsubBiller, memBillerStore, type BillerChain, type BillerEvent } from '../src/biller';
@@ -413,6 +413,41 @@ async function testConsent(): Promise<void> {
   check((await verifyConsentSignature(msg, signature, '0xdeadbeef')) === false, 'wrong claimed address fails verification');
 }
 
+// ===== agent-auth (proof-of-possession): bind cert + per-call signature close the bearer hole =====
+async function testAgentAuth(): Promise<void> {
+  console.log('\n• agent-auth (proof-of-possession — bearer mandateId hole)');
+  const subscriber = Ed25519Keypair.generate(); // owns the mandate (cert issuer)
+  const agent = Ed25519Keypair.generate(); // the delegated agent key
+  const attacker = Ed25519Keypair.generate();
+  const M = '0xMANDATE';
+  const now = (): bigint => BigInt(Date.now());
+
+  // BIND cert: only the on-chain subscriber can authorize an agent key.
+  const cert = await issueAgentCert(subscriber, { mandateId: M, agent: agent.toSuiAddress(), notAfter: 0n, ver: 1 });
+  check((await verifyBinding(M, cert, subscriber.toSuiAddress(), now())) === true, 'cert signed by the subscriber verifies');
+  check((await verifyBinding(M, cert, attacker.toSuiAddress(), now())) === false, 'cert does NOT verify against a non-subscriber (no forgery)');
+  const forged = await issueAgentCert(attacker, { mandateId: M, agent: attacker.toSuiAddress(), notAfter: 0n, ver: 1 });
+  check((await verifyBinding(M, forged, subscriber.toSuiAddress(), now())) === false, 'attacker-signed cert rejected (binding requires the subscriber key)');
+  const expiredCert = await issueAgentCert(subscriber, { mandateId: M, agent: agent.toSuiAddress(), notAfter: now() - 1_000n, ver: 1 });
+  check((await verifyBinding(M, expiredCert, subscriber.toSuiAddress(), now())) === false, 'expired cert (past not_after) rejected');
+  check((await verifyBinding('0xOTHER', cert, subscriber.toSuiAddress(), now())) === false, 'cert bound to mandate M does not verify for another mandate');
+
+  // CALL proof: the agent signs each call; bound to mandate + usage + merchant + payload + freshness.
+  const notAfter = now() + 60_000n;
+  const base = { mandateId: M, usageId: 'u1', merchant: '0xMERCH', payload: payloadOf(undefined, 30n), notAfter };
+  const { sig } = await signCall(agent, base);
+  const msg = (o: Partial<typeof base> = {}): string => callMessage({ ...base, ...o });
+  check((await verifyCallProof(msg(), sig, agent.toSuiAddress(), now(), notAfter)) === true, 'valid per-call proof verifies to the agent');
+  check((await verifyCallProof(msg(), sig, attacker.toSuiAddress(), now(), notAfter)) === false, 'proof does not verify to a different (attacker) address');
+  check((await verifyCallProof(msg({ usageId: 'u2' }), sig, agent.toSuiAddress(), now(), notAfter)) === false, 'replay on a different usageId fails (sig bound to the call)');
+  check((await verifyCallProof(msg({ payload: payloadOf(undefined, 99n) }), sig, agent.toSuiAddress(), now(), notAfter)) === false, 'different amount/payload fails (payload-bound)');
+  check((await verifyCallProof(msg(), sig, agent.toSuiAddress(), notAfter + 1n, notAfter)) === false, 'past not_after fails (freshness)');
+
+  // payloadOf determinism: meter items canonicalize order-independently.
+  check(payloadOf([{ meterKey: 'b', qty: 2n }, { meterKey: 'a', qty: 1n }]) === payloadOf([{ meterKey: 'a', qty: 1n }, { meterKey: 'b', qty: 2n }]), 'payloadOf canonicalizes meter items (order-independent)');
+  check(payloadOf(undefined, 30n) !== payloadOf(undefined, 31n), 'payloadOf distinguishes amounts');
+}
+
 // ===== recoverOrphan same-seq (High-1): cap-abort then same-seq lost-ack must recover EXACTLY once =====
 async function testRecoverOrphanSameSeq(): Promise<void> {
   console.log('\n• recoverOrphan same-seq (cap-abort then same-seq lost-ack → recover once, no double-count)');
@@ -556,6 +591,7 @@ async function main(): Promise<void> {
   await testFlushConcurrency();
   await testBillerHeartbeat();
   await testConsent();
+  await testAgentAuth();
   console.log(`\n${failed === 0 ? '✅' : '❌'} backend unit: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }

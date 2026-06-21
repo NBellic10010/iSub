@@ -7,6 +7,9 @@ build/
 # TypeScript build output
 dist/
 
+# GitBook/honkit build output (regenerated from docs/*.md)
+docs/_book/
+
 # Logs / temp
 *.log
 *.tmp
@@ -14,3 +17,11 @@ dist/
 # OS / editor junk
 .DS_Store
 *.swp
+
+# Secrets — actor/keeper private keys for public networks. NEVER commit.
+.secrets/
+
+# Seeded relationship-index sqlite (regenerable; also ignored in sdk/.gitignore)
+isub-index.*.db
+isub-index.*.db-shm
+isub-index.*.db-wal

@@ -14,6 +14,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Db } from './db';
 import { merchantByApiKey, sqlBillerStore, usageByMandate, chargesByMandate } from './sql-store';
 import { IsubService, type ServicePolicy, type UseResult } from './service';
+import { proofFromFields, type CallProof } from './agent-auth';
 import type { BillerChain, BillerEvent } from './biller';
 import type { IsubSigner } from './signer';
 import { WebhookDispatcher, eventToWebhook } from './webhook';
@@ -97,8 +98,8 @@ export class IsubGateway {
   // ===== in-process API (the thin client lands here; also handy for embedding/tests) =====
 
   /** Report a metered call against the agent's mandate (caller pre-priced the `amount`). */
-  async use(apiKey: string | undefined, mandateId: string, amount: bigint, usageId: string): Promise<UseResult> {
-    return this.serviceFor(this.auth(apiKey)).use(mandateId, amount, usageId);
+  async use(apiKey: string | undefined, mandateId: string, amount: bigint, usageId: string, proof?: CallProof): Promise<UseResult> {
+    return this.serviceFor(this.auth(apiKey)).use(mandateId, amount, usageId, proof);
   }
   /** Report RAW usage quantities; the tenant's RateCard prices them. Requires `routing.rateCard`. */
   async useMetered(
@@ -106,8 +107,9 @@ export class IsubGateway {
     mandateId: string,
     items: ReadonlyArray<{ meterKey: string; qty: bigint }>,
     usageId: string,
+    proof?: CallProof,
   ): Promise<UseResult> {
-    return this.serviceFor(this.auth(apiKey)).useMetered(mandateId, items, usageId);
+    return this.serviceFor(this.auth(apiKey)).useMetered(mandateId, items, usageId, proof);
   }
   status(apiKey: string | undefined, mandateId: string): ReturnType<IsubService['status']> {
     return this.serviceFor(this.auth(apiKey)).status(mandateId);
@@ -148,10 +150,11 @@ export class IsubGateway {
         const mandateId = headerOf(req, 'x-isub-mandate');
         if (!mandateId) return json(res, 400, { ok: false, reason: 'missing x-isub-mandate header' });
         const body = await readBody(req);
-        const { items, usageId } = JSON.parse(body || '{}') as { items?: { meterKey: string; qty: string }[]; usageId?: string };
+        const parsedBody = JSON.parse(body || '{}') as { items?: { meterKey: string; qty: string }[]; usageId?: string; agentSig?: unknown; agentSigNotAfter?: unknown; agentCert?: unknown };
+        const { items, usageId } = parsedBody;
         if (!Array.isArray(items) || usageId === undefined) return json(res, 400, { ok: false, reason: 'body needs { items: [{meterKey, qty}], usageId }' });
         const parsed = items.map((i) => ({ meterKey: String(i.meterKey), qty: BigInt(i.qty) }));
-        const r = await this.useMetered(apiKey, mandateId, parsed, String(usageId));
+        const r = await this.useMetered(apiKey, mandateId, parsed, String(usageId), proofFromFields(parsedBody));
         return json(res, r.status, r);
       }
 
@@ -159,9 +162,10 @@ export class IsubGateway {
         const mandateId = headerOf(req, 'x-isub-mandate');
         if (!mandateId) return json(res, 400, { ok: false, reason: 'missing x-isub-mandate header' });
         const body = await readBody(req);
-        const { amount, usageId } = JSON.parse(body || '{}') as { amount?: string; usageId?: string };
+        const parsedBody = JSON.parse(body || '{}') as { amount?: string; usageId?: string; agentSig?: unknown; agentSigNotAfter?: unknown; agentCert?: unknown };
+        const { amount, usageId } = parsedBody;
         if (amount === undefined || usageId === undefined) return json(res, 400, { ok: false, reason: 'body needs { amount, usageId }' });
-        const r = await this.use(apiKey, mandateId, BigInt(amount), String(usageId));
+        const r = await this.use(apiKey, mandateId, BigInt(amount), String(usageId), proofFromFields(parsedBody));
         return json(res, r.status, r);
       }
 

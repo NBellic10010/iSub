@@ -19,12 +19,20 @@ import type { IsubSigner } from './signer';
 import { IsubBiller, type BillerChain, type BillerEvent, type BillerStore } from './biller';
 import { ChargeMode, MandateStatus } from './constants';
 import { priceUsageMulti, type RateCard } from './pricing';
+import { callMessage, payloadOf, proofFromFields, verifyBinding, verifyCallProof, type CallProof } from './agent-auth';
 
 export interface ServicePolicy {
   /** Background flush cadence (ms). The biller settles every window. */
   windowMs: number;
   /** Also flush a mandate as soon as its un-settled usage crosses this (0 = window-only). */
   flushThresholdAmount?: bigint;
+  /**
+   * Agent proof-of-possession enforcement — closes the bearer-mandateId hole (see `agent-auth.ts`):
+   *   'off'     — no check (back-compat default; existing smokes pass unchanged).
+   *   'warn'    — verify; log unsigned/invalid calls but still serve (safe rollout window).
+   *   'enforce' — reject any call without a valid agent proof with 403.
+   */
+  agentAuth?: 'off' | 'warn' | 'enforce';
 }
 
 export interface UseResult {
@@ -41,6 +49,14 @@ interface Session {
   /** Un-settled usage since the last flush (for the D3 threshold). */
   pending: bigint;
   reason?: string;
+  /** The on-chain `subscriber` (who may authorize an agent key via a bind cert). Set at first sight. */
+  subscriber?: string;
+  /** Agent address bound by a verified cert (cached after first valid presentation). */
+  boundAgent?: string;
+  /** The bound cert's expiry (ms epoch; 0 = none) — re-checked every call so caching can't outlive it. */
+  boundNotAfter?: bigint;
+  /** Highest cert version accepted (rejects rollback to an older/rotated-out key). */
+  boundVer?: number;
 }
 
 export class IsubService {
@@ -49,6 +65,7 @@ export class IsubService {
   private readonly validating = new Map<string, Promise<Session>>();
   private readonly windowMs: number;
   private readonly flushThreshold: bigint;
+  private readonly agentAuth: 'off' | 'warn' | 'enforce';
   private ac?: AbortController;
 
   constructor(
@@ -64,6 +81,7 @@ export class IsubService {
   ) {
     this.windowMs = policy.windowMs;
     this.flushThreshold = policy.flushThresholdAmount ?? 0n;
+    this.agentAuth = policy.agentAuth ?? 'off';
     this.biller = new IsubBiller(chain, signer, store, {
       rateCard: this.rateCard,
       onEvent: (e) => {
@@ -78,10 +96,13 @@ export class IsubService {
    * usage. Returns 200 (served), 402 (gated — out of budget / not serviceable), or 403 (the
    * mandate isn't a valid credential for this service).
    */
-  async use(mandateId: string, amount: bigint, usageId: string): Promise<UseResult> {
+  async use(mandateId: string, amount: bigint, usageId: string, proof?: CallProof): Promise<UseResult> {
     if (amount <= 0n) return { ok: false, status: 400, reason: 'amount must be positive' };
     const s = await this.session(mandateId);
     if (!s.serviceable) return { ok: false, status: s.reason === 'mandate not for this service' || s.reason === 'not a PAYG mandate' ? 403 : 402, reason: s.reason };
+    if (!(await this.authorizeCall(s, mandateId, usageId, payloadOf(undefined, amount), proof))) {
+      return { ok: false, status: 403, reason: 'agent proof required or invalid (bearer mandateId rejected)' };
+    }
     if (s.remaining < amount) return { ok: false, status: 402, reason: 'insufficient remaining budget for this request' };
 
     await this.biller.recordUsage({ mandateId, amount, usageId });
@@ -107,6 +128,7 @@ export class IsubService {
     mandateId: string,
     items: ReadonlyArray<{ meterKey: string; qty: bigint }>,
     usageId: string,
+    proof?: CallProof,
   ): Promise<UseResult> {
     if (!this.rateCard) return { ok: false, status: 500, reason: 'no rate card configured for this service' };
     let amount: bigint;
@@ -119,6 +141,9 @@ export class IsubService {
 
     const s = await this.session(mandateId);
     if (!s.serviceable) return { ok: false, status: s.reason === 'mandate not for this service' || s.reason === 'not a PAYG mandate' ? 403 : 402, reason: s.reason };
+    if (!(await this.authorizeCall(s, mandateId, usageId, payloadOf(items), proof))) {
+      return { ok: false, status: 403, reason: 'agent proof required or invalid (bearer mandateId rejected)' };
+    }
     if (s.remaining < amount) return { ok: false, status: 402, reason: 'insufficient remaining budget for this request' };
 
     await this.biller.recordMeteredUsage({ mandateId, items, usageId });
@@ -139,6 +164,41 @@ export class IsubService {
     return s ? { serviceable: s.serviceable, remaining: s.remaining.toString(), reason: s.reason } : null;
   }
 
+  /**
+   * Agent proof-of-possession gate (closes the bearer-mandateId hole). 'off' → always allow; 'warn'
+   * → verify + log but allow; 'enforce' → only a valid proof passes. `payload` binds the signature to
+   * THIS exact charge (amount or sorted meter items) so a captured signature can't be reused.
+   */
+  private async authorizeCall(s: Session, mandateId: string, usageId: string, payload: string, proof?: CallProof): Promise<boolean> {
+    if (this.agentAuth === 'off') return true;
+    if (await this.verifyProof(s, mandateId, usageId, payload, proof)) return true;
+    if (this.agentAuth === 'warn') {
+      console.warn(`[isub] agent-auth WARN: missing/invalid proof on ${mandateId} (usage ${usageId}) — would be 403 in enforce mode`);
+      return true;
+    }
+    return false;
+  }
+
+  private async verifyProof(s: Session, mandateId: string, usageId: string, payload: string, proof?: CallProof): Promise<boolean> {
+    if (!proof || typeof proof.sig !== 'string' || proof.notAfter == null) return false;
+    const now = BigInt(Date.now());
+    // A presented cert (re)establishes the bound agent — re-verified against the on-chain subscriber,
+    // so the binding is self-verifying (no trusted store). Cached on the session after first sight.
+    if (proof.cert) {
+      if (!s.subscriber || !(await verifyBinding(mandateId, proof.cert, s.subscriber, now))) return false;
+      if (s.boundVer != null && proof.cert.ver < s.boundVer) return false; // rollback to a rotated-out key
+      s.boundAgent = proof.cert.agent;
+      s.boundVer = proof.cert.ver;
+      // Take the LATER expiry (0 = never) so a concurrent/older cert can't shrink the live session.
+      const cn = proof.cert.notAfter;
+      s.boundNotAfter = s.boundNotAfter == null ? cn : s.boundNotAfter === 0n || cn === 0n ? 0n : cn > s.boundNotAfter ? cn : s.boundNotAfter;
+    }
+    if (!s.boundAgent) return false; // no binding ever presented → bearer call, reject
+    if (s.boundNotAfter != null && s.boundNotAfter !== 0n && now >= s.boundNotAfter) return false; // cached binding expired
+    const msg = callMessage({ mandateId, usageId, merchant: this.payoutAddress, payload, notAfter: proof.notAfter });
+    return verifyCallProof(msg, proof.sig, s.boundAgent, now, proof.notAfter);
+  }
+
   /** First sight of a mandate → validate on-chain that it authorizes THIS service, then register. */
   private async session(mandateId: string): Promise<Session> {
     const existing = this.sessions.get(mandateId);
@@ -150,6 +210,7 @@ export class IsubService {
       const s: Session = { serviceable: false, remaining: 0n, pending: 0n };
       try {
         const m = await this.chain.getMandate(mandateId);
+        s.subscriber = m.subscriber; // who may authorize an agent key (bind-cert issuer)
         if (m.merchant !== this.payoutAddress) s.reason = 'mandate not for this service';
         else if (m.mode !== ChargeMode.Payg) s.reason = 'not a PAYG mandate';
         else if (m.status !== MandateStatus.Active) s.reason = 'mandate not active';
@@ -221,8 +282,8 @@ export class IsubService {
             res.statusCode = 400;
             return res.end(JSON.stringify({ ok: false, reason: 'missing x-isub-mandate header' }));
           }
-          const { amount, usageId } = JSON.parse(body || '{}') as { amount: string; usageId: string };
-          const r = await this.use(mandateId, BigInt(amount), String(usageId));
+          const parsed = JSON.parse(body || '{}') as { amount: string; usageId: string; agentSig?: unknown; agentSigNotAfter?: unknown; agentCert?: unknown };
+          const r = await this.use(mandateId, BigInt(parsed.amount), String(parsed.usageId), proofFromFields(parsed));
           res.statusCode = r.status;
           res.end(JSON.stringify(r));
         } catch (e) {

@@ -1,5 +1,9 @@
 import Link from 'next/link';
 
+// Developer handbook (GitBook). Set NEXT_PUBLIC_DOCS_URL to your published space
+// (e.g. https://your-space.gitbook.io/isub or a custom domain like https://docs.isub.app).
+const DOCS_URL = process.env.NEXT_PUBLIC_DOCS_URL || 'https://docs.isub.app';
+
 export default function Home() {
   return (
     <>
@@ -9,6 +13,7 @@ export default function Home() {
           <div className="row" style={{ gap: 22 }}>
             <Link href="/merchant" className="link">Merchants</Link>
             <Link href="/app" className="link">Subscribers</Link>
+            <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" className="link">Docs</a>
             <Link href="/app" className="btn">Open app</Link>
           </div>
         </div>
@@ -42,7 +47,10 @@ export default function Home() {
             Publish a plan, drop the embed on your site. Your customers review the real on-chain terms in an isolated
             checkout — you can collect and refund, but never pause, cancel, or touch their funds.
           </p>
-          <Link href="/merchant" className="link" style={{ color: 'var(--accent)' }}>Publish a plan →</Link>
+          <div className="row" style={{ gap: 18 }}>
+            <Link href="/merchant" className="link" style={{ color: 'var(--accent)' }}>Publish a plan →</Link>
+            <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" className="link" style={{ color: 'var(--accent)' }}>Read the SDK docs →</a>
+          </div>
         </div>
         <pre className="codecard">
 {`import { `}<span className="tok-fn">iSubCheckout</span>{` } `}<span className="tok-kw">from</span>{` `}<span className="tok-str">{'"@isub/checkout"'}</span>{`;
@@ -66,7 +74,10 @@ export default function Home() {
       <footer className="wrap" style={{ padding: '3.5rem 24px', marginTop: '2rem', borderTop: '0.5px solid var(--border)' }}>
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <span style={{ fontWeight: 500 }}>iSub</span>
-          <span className="muted" style={{ fontSize: 13 }}>Built on Sui · non-custodial by design</span>
+          <div className="row" style={{ gap: 18 }}>
+            <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" className="link">Docs</a>
+            <span className="muted" style={{ fontSize: 13 }}>Built on Sui · non-custodial by design</span>
+          </div>
         </div>
       </footer>
     </>

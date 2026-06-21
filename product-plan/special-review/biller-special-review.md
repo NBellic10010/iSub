@@ -87,7 +87,8 @@
 - 这是「调用者必须可信」的契约假设，但代码里**完全没明示**。
 - **建议**：注入 `KnownMandateProvider`（接口 `isKnown(mandateId): Promise<boolean>`），或在 ingest 时做缓存的链上 mandate 校验。最低限度：在文档里把这个契约假设钉死。
 
-#### A3. `inflight` Map 永不清理 → 长跑进程内存泄漏
+#### A3. `inflight` Map 永不清理 → 长跑进程内存泄漏  ✅ 已修复 (2026-06-20)
+> **修复**:`flushOne` 在 `next` settle 后 `finally` 清理 map 条目,带**身份守卫**(仅当自己仍是链尾时删,避免删掉更新的 flushOne 已链上的 tail);`.finally(...).catch(() => {})` **吞掉该分支的 rejection**(调用方仍收到并处理 `next` 本身,不产生第二个未处理 rejection)。新增 `get inflightCount()` 观测/测试钩子。回归:`biller:smoke` 新增断言「inflight map is cleaned up after settle」,37/37 绿。
 ```typescript
 private readonly inflight = new Map<string, Promise<unknown>>();
 
@@ -238,7 +239,7 @@ return 'rate_limited';
 ### Sprint 1（资金正确性闭环）—— 1~2 天
 1. **A1**: `BillerPolicy.requireLock` 启动校验。
 2. **A2**: `recordMeteredUsage` 加 mandate 校验注入点 + 文档化契约假设。
-3. **A3**: `inflight` Map cleanup（一行 `finally`）。
+3. **A3**: `inflight` Map cleanup（`finally` + 身份守卫 + rejection 吞掉 + `inflightCount` 钩子）。✅ 已修复
 4. **D2**: 加 leadership handoff e2e 测试用例。
 
 ### Sprint 2（可观测性 + 运维姿势）—— 1~2 天

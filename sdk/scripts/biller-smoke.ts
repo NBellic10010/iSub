@@ -117,6 +117,8 @@ async function main(): Promise<void> {
   const mB = await chainB.getMandate();
   check(chargedB === 150n && mB.spentTotal === 150n, `concurrent flush bills each record exactly once (150) — got ${chargedB}`);
   check(mB.chargeSeq === 1n, 'single-flight collapsed concurrent flushes into one charge (seq=1)');
+  await new Promise((r) => setTimeout(r, 0)); // let the post-settle cleanup microtasks drain
+  check(billerB.inflightCount === 0, 'A3: inflight map is cleaned up after settle (no long-run leak)');
 
   // ===== Scenario C: transient handling (retry in-flight; classify if stuck) =====
   console.log('\n• scenario C: transient retried in-flight; stuck transient classified');
@@ -147,7 +149,11 @@ async function main(): Promise<void> {
   console.log('\n• scenario D: spendableNow clamp');
   check(spendableNow(mkMandate({ rateCap: 50n, totalBudget: 200n, maxPerCharge: 30n }), 1000n, 0) === 30n, 'spendable = min(...) = maxPerCharge (30)');
   check(spendableNow(mkMandate({ status: MandateStatus.Revoked }), 1000n, 0) === 0n, 'revoked → spendable 0');
-  check(spendableNow(mkMandate({ notBeforeMs: 5000n }), 1000n, 0) === 0n, 'before first-charge window → spendable 0');
+  // A GENUINE future first-charge delay (a real trial, well beyond the clock-skew tolerance) → gated.
+  check(spendableNow(mkMandate({ notBeforeMs: 3_600_000n }), 1000n, 0) === 0n, 'before a real future first-charge window → spendable 0');
+  // But a not_before within the clock-skew tolerance (no-delay mandate, not_before≈authorize, local
+  // clock a hair behind chain) must NOT false-skip the first charge — the testnet first-charge fix.
+  check(spendableNow(mkMandate({ rateCap: 50n, totalBudget: 200n, maxPerCharge: 30n, notBeforeMs: 2000n }), 1000n, 0) === 30n, 'not_before within skew tolerance → still spendable (no false-skip)');
 
   // ===== Scenario E: SQL-backed BillerStore parity =====
   console.log('\n• scenario E: sqlBillerStore parity');

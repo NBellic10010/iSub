@@ -29,10 +29,12 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 import type { AgentTool } from './agent';
+import { proofFromFields } from './agent-auth';
+import type { CallProof } from './agent-auth';
 
 /** The slice of `IsubService` a metered tool needs (IsubService satisfies this structurally). */
 export interface MeteredService {
-  use(mandateId: string, amount: bigint, usageId: string): Promise<{ ok: boolean; status: number; reason?: string }>;
+  use(mandateId: string, amount: bigint, usageId: string, proof?: CallProof): Promise<{ ok: boolean; status: number; reason?: string }>;
 }
 
 /** A real, paid per-call service exposed as one MCP tool. `mandateId`/`usageId` args are added for you. */
@@ -68,13 +70,16 @@ const fail = (error: string, extra: Record<string, unknown> = {}): CallToolResul
 /** Stringify with bigints → decimal strings (defensive; tool handlers already stringify). */
 const jsonl = (v: unknown): string => JSON.stringify(v, (_k, val) => (typeof val === 'bigint' ? val.toString() : val));
 
-/** Inject the payment-credential args into a metered tool's business schema. */
+/** Inject the payment-credential + proof-of-possession args into a metered tool's business schema. */
 function meteredSchema(def: MeteredToolDef): Record<string, unknown> {
   return {
     type: 'object',
     properties: {
       mandateId: { type: 'string', description: 'Your payment credential — the mandate id returned by `subscribe`.' },
       usageId: { type: 'string', description: 'Optional idempotency id for this call (auto-generated if omitted).' },
+      agentSig: { type: 'string', description: 'Proof-of-possession: your agent key’s signature over this call (required when the service enforces agent auth).' },
+      agentSigNotAfter: { type: 'number', description: 'Freshness deadline (ms epoch) bound into agentSig.' },
+      agentCert: { type: 'object', description: 'Binding cert {agent,notAfter,ver,sig} the mandate subscriber signed; present at least on the first call.' },
       ...(def.args ?? {}),
     },
     required: ['mandateId', ...(def.required ?? [])],
@@ -82,19 +87,19 @@ function meteredSchema(def: MeteredToolDef): Record<string, unknown> {
   };
 }
 
-/** Meter the call (gate on budget/credential), then run the work only if payment is accepted. */
+/** Meter the call (gate on budget/credential/proof), then run the work only if payment is accepted. */
 async function runMetered(def: MeteredToolDef, service: MeteredService, args: Record<string, unknown>): Promise<CallToolResult> {
   const mandateId = typeof args.mandateId === 'string' ? args.mandateId : '';
   if (!mandateId) return fail('missing mandateId — call `subscribe` first, then pass the returned mandate id here');
   const usageId = typeof args.usageId === 'string' && args.usageId ? args.usageId : `u_${randomUUID()}`;
 
-  const paid = await service.use(mandateId, def.price, usageId);
+  const paid = await service.use(mandateId, def.price, usageId, proofFromFields(args));
   if (!paid.ok) {
-    // 402 = out of budget / not serviceable (top up or stop); 403 = bad credential for this service.
+    // 402 = out of budget / not serviceable (top up or stop); 403 = bad credential / missing agent proof.
     return fail(`payment required (HTTP ${paid.status}): ${paid.reason ?? 'not serviceable'}`, { status: paid.status, usageId });
   }
-  // Strip credentials so the business handler sees only its own args.
-  const { mandateId: _m, usageId: _u, ...businessArgs } = args;
+  // Strip credentials + proof so the business handler sees only its own args.
+  const { mandateId: _m, usageId: _u, agentSig: _s, agentSigNotAfter: _n, agentCert: _c, ...businessArgs } = args;
   const result = await def.run(businessArgs);
   return ok({ result, _payment: { charged: def.price.toString(), usageId, mandateId } });
 }

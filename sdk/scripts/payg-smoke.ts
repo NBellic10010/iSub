@@ -12,7 +12,7 @@ const LOCAL = NETWORK === 'localnet';
 const SUI = 1_000_000_000n;
 const DEPOSIT = (3n * SUI) / 10n; // 0.3 SUI
 const RATE_CAP = SUI / 10n; // 0.10 SUI per window
-const WINDOW_MS = LOCAL ? 3_000n : 12_000n;
+const WINDOW_MS = LOCAL ? 6_000n : 12_000n;
 const BUDGET = SUI / 5n; // 0.2 SUI lifetime
 const A1 = (3n * SUI) / 100n; // 0.03
 const A2 = (8n * SUI) / 100n; // 0.08
@@ -83,6 +83,12 @@ async function main(): Promise<void> {
   eqBig(m.spentTotal, A1, 'spent_total = 0.03');
   eqBig((await isub.getAccount(accountId)).balance, DEPOSIT - A1, 'account debited exactly');
 
+  // rate cap — asserted IMMEDIATELY after charge #1 so it can't race the window rollover: this
+  // must land in the SAME window as charge #1 (window_spent 0.03 + 0.08 > 0.10 cap). A failed
+  // charge doesn't advance charge_seq, so seq stays 1 for the negative checks + charge #2 below.
+  console.log('\n• over rate cap in same window → expect EOverRateCap');
+  await expectAbort(isub.chargeMetered(keeper, { accountId, mandateId, amount: A2, seq: 1n }), 8, 'over-cap charge');
+
   // N-1 ★ the double-charge hole is closed
   console.log('\n• retry same bill (replay seq 0) → expect EBadChargeSeq');
   await expectAbort(isub.chargeMetered(keeper, { accountId, mandateId, amount: A1, seq: 0n }), 20, 'replayed bill');
@@ -91,10 +97,6 @@ async function main(): Promise<void> {
   await expectAbort(isub.chargeMetered(keeper, { accountId, mandateId, amount: A1, seq: 5n }), 20, 'future seq');
   console.log('\n• legacy charge() on PAYG mandate → expect EBadMode');
   await expectAbort(isub.charge(keeper, { accountId, mandateId, amount: A1 }), 12, 'seq-less metered charge');
-
-  // rate cap still enforced
-  console.log('\n• over rate cap in same window → expect EOverRateCap');
-  await expectAbort(isub.chargeMetered(keeper, { accountId, mandateId, amount: A2, seq: 1n }), 8, 'over-cap charge');
 
   console.log(`\n• wait one window (${WINDOW_MS}ms), charge #2 (keeper, seq 1)`);
   await sleep(Number(WINDOW_MS) + (LOCAL ? 1_000 : 3_000));
