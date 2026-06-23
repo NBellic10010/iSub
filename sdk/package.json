@@ -49,6 +49,8 @@
     "mock:seed": "NODE_OPTIONS=--experimental-sqlite tsx scripts/mock-seed.ts",
     "gateway:serve": "NODE_OPTIONS=--experimental-sqlite tsx scripts/gateway-serve.ts",
     "gateway-serve:testnet": "ISUB_NETWORK=testnet NODE_OPTIONS=--experimental-sqlite tsx scripts/gateway-serve.ts",
+    "stack": "tsx scripts/run-stack.ts",
+    "stack:testnet": "ISUB_NETWORK=testnet tsx scripts/run-stack.ts",
     "scheduler:smoke": "NODE_OPTIONS=--experimental-sqlite tsx scripts/scheduler-smoke.ts",
     "scheduler-e2e": "tsx scripts/scheduler-e2e.ts",
     "scheduler-e2e:testnet": "ISUB_NETWORK=testnet tsx scripts/scheduler-e2e.ts",
