@@ -1,0 +1,17 @@
+# iSub docs — builds the GitBook-structured docs (docs/SUMMARY.md + sections) into a static site with
+# honkit, then serves it. Build context = repo root.
+#   Railway: new service → Dockerfile path = Dockerfile.docs → enable a public domain. No env needed.
+# (docs/_book is gitignored build output; this rebuilds fresh in the image, so nothing stale ships.)
+FROM node:22-slim AS build
+WORKDIR /app
+COPY docs ./docs
+# honkit reads docs/SUMMARY.md + README.md + sections; emits a static site to ./_site
+RUN npx -y honkit@latest build docs ./_site
+
+FROM node:22-slim
+WORKDIR /app
+RUN npm i -g serve
+COPY --from=build /app/_site ./_site
+EXPOSE 4200
+# Railway injects PORT; serve binds 0.0.0.0.
+CMD ["sh", "-c", "serve -l ${PORT:-4200} _site"]
