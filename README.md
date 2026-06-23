@@ -24,6 +24,21 @@ The demo is the easy part; the hard part is being correct under failure. iSub gi
 - **Keeper-proof caps (on-chain)** — rate / per-charge / total-budget / balance / expiry are enforced by the contract. The keeper can only trigger charges the chain already permits, paid to the merchant — trust is liveness-only, never custody.
 
 ```mermaid
+flowchart LR
+    A["call · usageId + agent proof"] --> G{"per-call gate"}
+    G -- "forged / bearer / replay→new id" --> R1["403"]
+    G -- "over cap" --> R2["402"]
+    G -- "usageId already used" --> R3["409 · single-use"]
+    G -- pass --> U["record + accrue (off-chain)"]
+    U --> S["flush · recoverOrphan<br/>(already landed? mark billed, never re-charge)"]
+    S --> C["charge_metered(seq)<br/>on-chain caps + idempotent"]
+    C --> Z(["charged exactly once ✓ + digest"])
+```
+
+<details>
+<summary>Full flow — per-call gate → settlement reconciliation (click to expand)</summary>
+
+```mermaid
 flowchart TD
     A["use(mandateId, amount, usageId, proof)"] --> B{"First-sight valid?<br/>merchant==payout · PAYG · Active · not expired"}
     B -- no --> S1["402 / 403 — not serviceable"]
@@ -52,6 +67,8 @@ flowchart TD
     N -- success --> P["commit: markBilled · 'charged' · seq++<br/>coins → merchant"]
     P --> Q(["Charged exactly once ✓<br/>on-chain digest + spent_total"])
 ```
+
+</details>
 
 Code: per-call gate in [`sdk/src/service.ts`](sdk/src/service.ts); settlement + `recoverOrphan` in [`sdk/src/biller.ts`](sdk/src/biller.ts); on-chain caps + `charge_seq` in [`contracts/sources/subscription.move`](contracts/sources/subscription.move); agent proof-of-possession in [`sdk/src/agent-auth.ts`](sdk/src/agent-auth.ts). Failure paths (lost-ack / crash / lock contention / replay) are covered by `npm run biller:smoke` and `npm run agent-auth:redteam`.
 
