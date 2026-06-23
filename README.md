@@ -1,13 +1,15 @@
-# iSub — Sui-native subscription primitive
+# iSub — non-custodial pull-payment rail for subscriptions & AI agents on Sui
 
-> **In one line:** non-custodial recurring pull payments (**no pre-funding**, sign once, capped, revocable anytime) — letting any Sui merchant/app add "subscriptions" in a single line of integration.
-> Status: Phase 0–1.9 complete (contracts **68/68** + 4 rounds of security self-review + SDK/keeper/e2e over **gRPC**, green on **both localnet and Sui testnet**, 2026-06-13). Target: Sui Overflow 2026 (deadline 6/21, usually extended to ~6/23).
+> **In one line:** a non-custodial, capped, revocable **pull-payment primitive** on Sui — sign one on-chain *mandate* and a service (or an AI agent) charges within it, covering both recurring subscriptions (**Fixed**) and metered pay-as-you-go (**PAYG**). Funds never leave the user's wallet. **The payment rail for both human subscriptions and the agent economy.**
+> **Status:** live on **Sui testnet** (package `0xb11a3def…`) — Move contracts (**68/68** tests + multiple security self-reviews) · TS SDK + managed gateway/keeper/biller · an **x402** `mandate` scheme (buyer/seller/facilitator) · **agent proof-of-possession** (replay/rollback-hardened) · a monthly **compliance CSV export** — all exercised by **real on-chain charges** and a failure-path test suite (lost-ack / crash / lock contention / replay). **AP2-aligned** (adapter planned, not yet shipped). Built for **Sui Overflow 2026**.
 
 ## What it is
 
-Crypto payments have a proven, real pain point: **non-custodial wallets can't auto-charge** — stablecoins live in the user's own wallet, so a merchant can't pull a recurring fee without the user signing every time. Stripe can auto-renew; non-custodial crypto gateways can't.
+Crypto payments have a real, proven gap: **non-custodial wallets can't auto-charge** — funds live in the user's own wallet, so a merchant can't pull a recurring or per-use fee without the user signing every time. Stripe can auto-renew; non-custodial crypto can't. And now **AI agents** need to pay per API call autonomously — with no human to sign each charge.
 
-**iSub solves this with Sui's object model (Account + Mandate):** the user keeps a balance in their own **payment Account they can withdraw from at any time**, then **signs once** to issue the merchant a **capped, revocable charge authorization (Mandate)** — **no pre-funding** (authorize moves no funds); the merchant (or a keeper) pulls from the user's Account each period, within the authorized limit. It's the **Sui equivalent of a Stripe card-on-file**. Positioned as a **primitive + SDK** — other merchants/apps embed it to collect subscriptions, rather than being yet another finished app.
+**iSub solves both with one Sui-object primitive (Account + Mandate):** the user keeps a balance in their own **Account they can withdraw from anytime**, then **signs once** to issue a **capped, revocable charge authorization (Mandate)** — **no pre-funding** (authorize moves no funds). A keeper then **pulls** within the authorized limit: a **Fixed** subscription on its interval, or a **PAYG** metered charge per use. The same mandate works whether the payer is a human checkout or an **AI agent presenting a proof-of-possession** (**x402-native, AP2-aligned**) — the agent signs an authorization, never the user's keys, and never a fresh transfer per call.
+
+It's the **Sui equivalent of a Stripe card-on-file — but non-custodial and agent-native**, and it ships as a **primitive + SDK**: a merchant embeds it in a few frontend lines (one checkout, one plan id), with **no custody to hold and no keeper to run** in the managed path. On-chain, the contract enforces every limit (rate / per-charge / total budget / expiry / idempotent `charge_seq`), so even the keeper can only charge what the user authorized — see [Billing & anti-replay](#billing--anti-replay-money-correctness) for the money-correctness model.
 
 ## Why "subscriptions", not "streaming"
 
