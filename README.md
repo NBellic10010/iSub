@@ -1,6 +1,20 @@
 # iSub — non-custodial pull-payment rail for subscriptions & AI agents on Sui
 
-> **In one line:** a non-custodial, capped, revocable **pull-payment primitive** on Sui — sign one on-chain *mandate* and a service (or an AI agent) charges within it, covering both recurring subscriptions (**Fixed**) and metered pay-as-you-go (**PAYG**). Funds never leave the user's wallet. **The payment rail for both human subscriptions and the agent economy.**
+**Picture this.** You give your AI agent an API key and leave your credit card on file — how every SaaS bills today. Overnight it loops on a bad prompt and hits that paid API 100,000 times. You learn the total from the invoice: **$4,000, already charged.** Now you're filing for a refund. That's the status quo — *an API key has no spending limit, and a card on file is a blank check you only reconcile after the money's gone* — and the moment your agent wants a service it didn't pre-register with, it just stops: it can't sign up or enter a card on its own.
+
+**iSub is the opposite.** You sign one on-chain **mandate** — *"this agent, at most 50 USDC / month on this service"* — and the agent pays per call from a balance **in its owner's own wallet**. At the cap, the **contract** cuts it off on-chain, *before the next charge can move*. A leaked authorization is bounded by that cap and revocable in one tap; a brand-new provider mid-task gets paid within budget — no signup, no card, no human in the loop.
+
+> **API key + Stripe:** trust first, discover the damage on the invoice.
+> **iSub:** the limit you signed, enforced by the chain *before the money moves*.
+
+> **At a glance:**
+>
+> - **Non-custodial, capped, revocable pull-payment primitive** on Sui.
+> - **Sign one on-chain *mandate*** → a service (or an AI agent) charges *within it* — never a fresh signature per charge.
+> - Covers both **recurring subscriptions (Fixed)** and **metered pay-as-you-go (PAYG)**.
+> - **Funds never leave the user's own wallet** — withdraw or revoke anytime.
+> - The payment rail for **both human subscriptions and the agent economy**.
+>
 > **Status:** live on **Sui testnet** (package `0xb11a3def…`) — Move contracts (**72/72** tests + multiple security self-reviews) · TS SDK + managed gateway/keeper/biller · an **x402** `mandate` scheme (buyer/seller/facilitator) · **agent proof-of-possession** (replay/rollback-hardened) · a monthly **compliance CSV export** — all exercised by **real on-chain charges** and a failure-path test suite (lost-ack / crash / lock contention / replay). **AP2-aligned** (adapter planned, not yet shipped). Built for **Sui Overflow 2026**.
 
 ## What it is
