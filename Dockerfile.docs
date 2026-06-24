@@ -5,10 +5,12 @@
 FROM node:22-slim AS build
 WORKDIR /app
 COPY docs ./docs
-# honkit reads docs/SUMMARY.md + README.md + sections; emits a static site to ./_site.
+# honkit reads docs/SUMMARY.md + README.md + sections; emits a static site to /app/_site.
 # Pinned (not @latest) for reproducible builds. Code fences must use a language highlight.js knows
 # (no `move` — use `rust`; an unknown language throws "Unknown language" and fails the build).
-RUN npx -y honkit@6.2.2 build docs ./_site
+# NOTE: the output path must be ABSOLUTE — honkit resolves a RELATIVE output against the book dir
+# (so `./_site` would land at /app/docs/_site and the COPY below would 404).
+RUN npx -y honkit@6.2.2 build docs /app/_site
 
 FROM node:22-slim
 WORKDIR /app
