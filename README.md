@@ -1,8 +1,17 @@
 # iSub — non-custodial pull-payment rail for subscriptions & AI agents on Sui
 
-**Picture this.** You give your AI agent an API key and leave your credit card on file — how every SaaS bills today. Overnight it loops on a bad prompt and hits that paid API 100,000 times. You learn the total from the invoice: **$4,000, already charged.** Now you're filing for a refund. That's the status quo — *an API key has no spending limit, and a card on file is a blank check you only reconcile after the money's gone* — and the moment your agent wants a service it didn't pre-register with, it just stops: it can't sign up or enter a card on its own.
+**Picture this.** It's 3 a.m. Your agent hits a retry storm on a paid API and calls it 100,000 times before you wake up. The first you hear of it is a **$4,000 charge that already cleared** — you never approved it, you just left a card on file, the way every SaaS wants you to. That's the status quo for paying for an API: *a key with no spending limit, behind a card that's a blank check you only reconcile after the money is gone.*
 
-**iSub is the opposite.** You sign one on-chain **mandate** — *"this agent, at most 50 USDC / month on this service"* — and the agent pays per call from a balance **in its owner's own wallet**. At the cap, the **contract** cuts it off on-chain, *before the next charge can move*. A leaked authorization is bounded by that cap and revocable in one tap; a brand-new provider mid-task gets paid within budget — no signup, no card, no human in the loop.
+**An API key + a card on file falls apart the moment an _agent_, not a human, is the one spending:**
+
+- **No ceiling.** A looping, buggy, or prompt-injected agent can burn your entire card limit before the invoice ever arrives — there's no per-agent, per-service cap that's actually enforced *before* the charge.
+- **No discovery.** The instant your agent needs a service it didn't pre-register with, it stops cold: it can't sign up, can't enter a card, can't mint itself a key.
+- **No safe delegation.** Handing an agent an API key hands it your *whole* limit. "This agent, this service, $50 max" isn't something a key or a card can promise.
+- **Fiat detour.** A crypto-native agent already holds funds and runs non-custodially — a card forces a human, a KYC signup, and an on-ramp it can't do on its own.
+- **Doesn't scale to the long tail.** No agent is going to open a Stripe relationship with each of forty small per-call providers at runtime.
+- **Leaked = drained.** A leaked key spends your quota until *you* notice and rotate it — no cap, no kill-switch.
+
+**Why iSub is the better choice.** You sign one on-chain **mandate** — *"this agent, ≤ 50 USDC / month on this service"* — and the **contract enforces that limit on every charge, before the money moves.** Funds stay in your own non-custodial wallet; the agent pays per call with a signed proof, never your keys; the authorization is capped and revocable in one tap; and a brand-new provider gets paid within budget, no signup required. One primitive covers a flat subscription (**Fixed**) or metered pay-as-you-go (**PAYG**), settled in stablecoin. The worst a runaway agent can cost you is **exactly what you signed — not a cent more.**
 
 > **API key + Stripe:** trust first, discover the damage on the invoice.
 > **iSub:** the limit you signed, enforced by the chain *before the money moves*.
