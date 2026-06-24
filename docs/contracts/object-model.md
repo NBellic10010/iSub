@@ -12,7 +12,7 @@ All three are `transfer::share_object`, so they're reachable by id from any tran
 
 ## Entry functions
 
-```move
+```rust
 // account (subscriber)
 public fun open_account<T>(ctx)
 public fun deposit<T>(account, coin)
