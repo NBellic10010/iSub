@@ -110,7 +110,58 @@ flowchart TD
 
 </details>
 
-Code: per-call gate in [`sdk/src/service.ts`](sdk/src/service.ts); settlement + `recoverOrphan` in [`sdk/src/biller.ts`](sdk/src/biller.ts); on-chain caps + `charge_seq` in [`contracts/sources/subscription.move`](contracts/sources/subscription.move); agent proof-of-possession in [`sdk/src/agent-auth.ts`](sdk/src/agent-auth.ts). The per-path evidence that these hold under failure is the next section.
+Code: per-call gate in [`sdk/src/service.ts`](sdk/src/service.ts); settlement + `recoverOrphan` in [`sdk/src/biller.ts`](sdk/src/biller.ts); on-chain caps + `charge_seq` in [`contracts/sources/subscription.move`](contracts/sources/subscription.move); agent proof-of-possession in [`sdk/src/agent-auth.ts`](sdk/src/agent-auth.ts). The per-path evidence that these hold under failure is in [Correctness under failure](#correctness-under-failure); the agent proof-of-possession is detailed just below.
+
+## Agent proof-of-possession (two signatures)
+
+A `mandateId` is a **public** on-chain object id. If presenting it were enough to be served or charged, anyone who observed it could pull the paid service — a **bearer hole**. On-chain caps keep *funds* safe (the chain only ever charges within what was authorized), but the *service* could still be stolen. iSub closes this with a **two-signature proof-of-possession**: only the key the subscriber explicitly authorized can spend, and only for the exact call it signed.
+
+**1 · Bind cert — the subscriber authorizes an agent key (signed once, then cached).**
+
+```
+isub-agent-bind-v1
+mandate=<mandateId>
+agent=<agent address>
+not_after=<ms epoch | 0 = bounded by the mandate's expiry>
+ver=<monotonic integer>
+```
+
+The mandate's **subscriber** signs this. It is **self-verifying**: the service recovers the signer and checks it equals the mandate's on-chain `subscriber` — no trusted certificate store. `ver` is a **rollback floor** — a cert below the highest `ver` ever *durably* accepted for that mandate is refused, so a rotated-out or leaked agent key can't be replayed, even across a restart or a second service instance.
+
+**2 · Call proof — the agent signs every individual call.**
+
+```
+isub-call-v1
+mandate=<mandateId>
+usage=<usageId — a one-time nonce>
+merchant=<payTo>
+payload=<amount=N  |  items=k1:q1,k2:q2,… (meter keys sorted)>
+not_after=<ms epoch>
+```
+
+The **agent** signs this per call. The service recovers the signer and checks it equals the **bound agent** (from the cert), then checks `not_after`, that `payload` equals the charge being settled, and that `usageId` has never been seen before.
+
+Both signatures are **ed25519 over Sui's personal-message envelope** (`@mysten/sui/verify`), so the *same* verification code accepts a raw keypair, a browser wallet, or a zkLogin / Enoki signer — and binds the proof to Sui's domain separation.
+
+```mermaid
+sequenceDiagram
+    participant U as Subscriber wallet
+    participant A as Agent · delegated key
+    participant S as Service / x402 facilitator
+    participant C as Sui · Mandate
+    U->>C: authorize mandate — subscriber = sender
+    U-->>A: BIND CERT — sign agent ↔ mandate, ver, not_after — once
+    A->>S: call + CALL PROOF — sign mandate · usageId · merchant · payload · not_after
+    S->>S: bind-cert recovers to on-chain subscriber? · ver ≥ floor?
+    S->>S: call-proof recovers to bound agent? · payload matches? · usageId fresh?
+    S->>C: charge_metered within caps · charge_seq
+    C-->>S: charged ✓
+    S-->>A: 200 — served
+```
+
+Why two signatures (and not one): the **bind** proves *who may spend* against the on-chain subscriber and is reusable; the **call** proves *this exact charge was authorized by that agent* and is one-shot. Splitting them lets the agent pay autonomously per call without the user re-signing, while the user's key never touches a per-call message. The construction yields — a bare `mandateId` → `403`; a captured signature replayed on a new `usageId` → `403` (the proof is bound to the exact call); a verbatim replay → `409` (single-use); an expired, wrong-amount, or expired-cert proof → `403`. The adversarial proof that each holds — against an attacker that even *shares the merchant runtime* — is in [Correctness under failure](#correctness-under-failure).
+
+Code: [`sdk/src/agent-auth.ts`](sdk/src/agent-auth.ts) (`issueAgentCert` / `signCall` / `verifyBinding` / `verifyCallProof`) and the per-call gate in [`sdk/src/service.ts`](sdk/src/service.ts); exercised by `npm run agent-auth:redteam` (forgery / replay) and `npm run agent-auth:durable` (cross-instance rollback floor). Chain-neutral write-up: [`spec/x402-mandate-scheme.md` §3.2](spec/x402-mandate-scheme.md).
 
 ## Correctness under failure
 
