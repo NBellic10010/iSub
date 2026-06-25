@@ -17,7 +17,7 @@
 // drives the deterministic CI test (mock chain, `InMemoryTransport`) and the live Claude
 // Desktop demo (real testnet, stdio) — only what you inject underneath changes.
 //
-// Server-only (node:crypto + the MCP SDK). Import via `@isub/sdk/mcp`, not the core index.
+// Server-only (node:crypto + the MCP SDK). Import via `@isubpay/sdk/mcp`, not the core index.
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {

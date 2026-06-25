@@ -1,8 +1,8 @@
 // ===== The iSub managed gateway client (off-chain relationship index + usage) =====
 //
-// The on-chain reads go through @isub/sdk + the wallet (use-isub.ts). This is the seam to the
+// The on-chain reads go through @isubpay/sdk + the wallet (use-isub.ts). This is the seam to the
 // gateway's OFF-CHAIN relationship index — the part gRPC can't serve (merchant→plans,
-// subscriber→mandates across merchants, owner→accounts). It mirrors @isub/sdk/gateway's HTTP routes.
+// subscriber→mandates across merchants, owner→accounts). It mirrors @isubpay/sdk/gateway's HTTP routes.
 //
 // The wallet-based dashboards use the PUBLIC, address-keyed routes (no api-key — these are public
 // on-chain objects, just made queryable) + public write-time ingest. The api-key routes

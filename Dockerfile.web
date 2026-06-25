@@ -1,5 +1,5 @@
 # iSub web (Next.js dashboards + checkout). Build context = repo root (it's an npm-workspace monorepo;
-# @isub/web depends on the @isub/sdk workspace, which Next transpiles from source — so the WHOLE repo
+# @isub/web depends on the @isubpay/sdk workspace, which Next transpiles from source — so the WHOLE repo
 # must be installed together, not just web/).
 #   Railway: new service → Dockerfile path = Dockerfile.web → set env GATEWAY_ORIGIN (the backend's URL)
 #   and NEXT_PUBLIC_DOCS_URL (the docs service's URL). BOTH are BUILD-time: NEXT_PUBLIC_* is inlined, and

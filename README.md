@@ -1,5 +1,7 @@
 # iSub — non-custodial pull-payment rail for subscriptions & AI agents on Sui
 
+**[🌐 Live app](https://web-production-45b76.up.railway.app)**  ·  **[📄 Docs](https://docs-production-ef42.up.railway.app)**  ·  **[▶ Demo (2 min · turn captions ON — no audio)](https://youtu.be/v4YMVJ7wflE)**  ·  **[🔗 Testnet package](https://suiscan.xyz/testnet/object/0xb11a3defcf0edb190edcf17aab87946a78ff514b1c547ff02dc5444b093bce7a)**  ·  live on **Sui testnet**
+
 **Picture this.** It's 3 a.m. Your agent hits a retry storm on a paid API and calls it 100,000 times before you wake up. The first you hear of it is a **$4,000 charge that already cleared** — you never approved it, you just left a card on file, the way every SaaS wants you to. That's the status quo for paying for an API: *a key with no spending limit, behind a card that's a blank check you only reconcile after the money is gone.*
 
 **An API key + a card on file falls apart the moment an _agent_, not a human, is the one spending:**

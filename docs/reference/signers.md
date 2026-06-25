@@ -24,7 +24,7 @@ The signer normalizes raw transport results into `IsubExecResult`, so the client
 ## Node / CLI — `keypairSigner`
 
 ```typescript
-import { keypairSigner } from '@isub/sdk';
+import { keypairSigner } from '@isubpay/sdk';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 
 const signer = keypairSigner(keypair, client); // keypair: any @mysten/sui Signer (Ed25519/Secp256k1/Secp256r1)
@@ -35,7 +35,7 @@ It signs, executes, **waits for the fullnode to index the tx** (read-after-write
 ## Browser — `walletSigner`
 
 ```typescript
-import { walletSigner } from '@isub/sdk';
+import { walletSigner } from '@isubpay/sdk';
 
 const signer = walletSigner(adapter, client); // adapter: a dApp-kit wallet adapter
 ```

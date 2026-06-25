@@ -3,7 +3,7 @@
 // (in any language) integrates by receiving SIGNED HTTP webhooks: provision on
 // `subscription.active`, gate on `charge.past_due`, deprovision on `mandate.lapsed`.
 //
-// Server-only (uses node:crypto). Import via `@isub/sdk/webhook`, not the main index.
+// Server-only (uses node:crypto). Import via `@isubpay/sdk/webhook`, not the main index.
 import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 import type { KeeperEvent } from './keeper';
 

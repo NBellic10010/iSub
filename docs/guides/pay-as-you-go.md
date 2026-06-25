@@ -51,7 +51,7 @@ You almost never call `chargeMetered` by hand — the [biller](billing-automatio
 Most PAYG services meter **raw quantities** (tokens, calls, GB), not SUI. A `RateCard` converts quantities → an exact MIST amount, **frozen at ingest** so a later price change never re-prices past usage.
 
 ```typescript
-import { priceUsageMulti, type RateCard } from '@isub/sdk';
+import { priceUsageMulti, type RateCard } from '@isubpay/sdk';
 
 const card: RateCard = {
   version: 1,
@@ -76,7 +76,7 @@ A `Meter` is an exact rational price `priceNum / (priceDen × units)` with optio
 ## End-to-end with the biller
 
 ```typescript
-import { IsubBiller } from '@isub/sdk/biller';
+import { IsubBiller } from '@isubpay/sdk/biller';
 
 const biller = new IsubBiller(isub, keeper, store, { rateCard: card });
 

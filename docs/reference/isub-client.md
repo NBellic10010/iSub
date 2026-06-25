@@ -3,7 +3,7 @@
 The high-level client. Builds a PTB, executes it through an `IsubSigner`, and parses ids / typed state. Writes return `{ digest, … }`; reads return `*State` objects.
 
 ```typescript
-import { IsubClient } from '@isub/sdk';
+import { IsubClient } from '@isubpay/sdk';
 
 const isub = new IsubClient({ client, packageId, coinType? });
 isub.client;  // the underlying SuiGrpcClient (for raw reads like getBalance)

@@ -8,7 +8,7 @@ All amounts are in the coin's base units. For SUI that's **MIST** (1 SUI = `1_00
 
 ```typescript
 import { SuiGrpcClient } from '@mysten/sui/grpc';
-import { IsubClient, keypairSigner, MandateStatus } from '@isub/sdk';
+import { IsubClient, keypairSigner, MandateStatus } from '@isubpay/sdk';
 
 const client = new SuiGrpcClient({ network: 'testnet', baseUrl: 'https://fullnode.testnet.sui.io:443' });
 const isub = new IsubClient({ client, packageId: '0xb11a…' });

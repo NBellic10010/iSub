@@ -18,7 +18,7 @@
 
 - **Vite + React + TS**（单页，两条路由）。
 - **@mysten/dapp-kit**：`ConnectButton`、`useSuiClient`、`useSignAndExecuteTransaction`、`useCurrentAccount`；`@tanstack/react-query`（dapp-kit 依赖）。
-- 消费 **`@isub/sdk`**（本仓 `sdk/`）——tx 构建 + 解析 + 类型直接复用，UI 不碰 PTB 细节。
+- 消费 **`@isubpay/sdk`**（本仓 `sdk/`）——tx 构建 + 解析 + 类型直接复用，UI 不碰 PTB 细节。
 
 ## login/signer 适配（关键复用点）
 
@@ -62,7 +62,7 @@ function walletSigner(account, signAndExecuteTransaction): IsubSigner {
 
 ## Scope
 
-- **Tier 1（必做）**：两面板 + 钱包连接 + 建套餐→授权→可见周期扣费→取消/取回 + 接 `@isub/sdk` + keeper 后台。
+- **Tier 1（必做）**：两面板 + 钱包连接 + 建套餐→授权→可见周期扣费→取消/取回 + 接 `@isubpay/sdk` + keeper 后台。
 - **Tier 2（挑 1–2）**：zkLogin 登录 / sponsored 免 gas / PAYG 计量 demo（**agent 花费预算**很抓眼球）/ checkout 一行嵌入 widget。
 - **不做**：法币 on-ramp（mock，假设 Account 已有币）、多币种 FX。
 

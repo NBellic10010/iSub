@@ -1,5 +1,5 @@
 // `IsubGateway` — the MANAGED multi-tenant front over `IsubService`. iSub runs ONE of
-// these; a merchant integrates with just an api-key + the thin `@isub/sdk/client`,
+// these; a merchant integrates with just an api-key + the thin `@isubpay/sdk/client`,
 // running NOTHING itself (no service / biller / DB / charge-signing).
 //
 // Why managed doesn't break non-custody: the gateway signs charges with iSub's keeper
@@ -9,7 +9,7 @@
 // Trust is LIVENESS-only (we bill on time), never SAFETY. (Decisions D1–D7,
 // managed-integration-plan.md.)
 //
-// Server-only (node:http + node:sqlite) — import `@isub/sdk/gateway`.
+// Server-only (node:http + node:sqlite) — import `@isubpay/sdk/gateway`.
 import { createServer as createHttpServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https';
 import type { Db } from './db';

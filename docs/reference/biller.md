@@ -3,7 +3,7 @@
 Turns **PAYG usage** into **metered on-chain charges**: record usage (optionally priced by a RateCard), then flush it into `chargeMetered` calls that respect every cap and never double-bill.
 
 ```typescript
-import { IsubBiller } from '@isub/sdk/biller';
+import { IsubBiller } from '@isubpay/sdk/biller';
 
 const biller = new IsubBiller(chain, signer, store, {
   policy?: BillerPolicy,
@@ -14,7 +14,7 @@ const biller = new IsubBiller(chain, signer, store, {
 
 * `chain` — an `IsubClient` (or any `BillerChain`: `getMandate` / `getAccount` / `chargeMetered`).
 * `signer` — must be the mandate's **merchant or authorized keeper**.
-* `store` — a `BillerStore` (e.g. `sqlBillerStore(db, tenantId)` from `@isub/sdk/sql-store`, or `memBillerStore()`).
+* `store` — a `BillerStore` (e.g. `sqlBillerStore(db, tenantId)` from `@isubpay/sdk/sql-store`, or `memBillerStore()`).
 
 ## Recording usage
 

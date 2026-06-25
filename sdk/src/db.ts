@@ -7,7 +7,7 @@
 // `merchant_id` — that column IS the tenant boundary.
 //
 // Requires Node ≥ 22.5 run with --experimental-sqlite. Server-only — import
-// `@isub/sdk/db`, never from the browser-safe index.
+// `@isubpay/sdk/db`, never from the browser-safe index.
 import { DatabaseSync } from 'node:sqlite';
 
 export type Db = DatabaseSync;

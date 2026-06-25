@@ -1,4 +1,4 @@
-# @isub/sdk
+# @isubpay/sdk
 
 TypeScript SDK + runnable scripts for **iSub** — a non-custodial recurring/metered
 pull-payment primitive on Sui (Account + Mandate). The Sui equivalent of Stripe's

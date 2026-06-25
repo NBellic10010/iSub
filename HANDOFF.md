@@ -93,7 +93,7 @@
 把"能跑的系统"往"可托管产品 / agent PAYG"推，全部 headless 可测：
 - **多租户 SQL 持久化**（`src/db.ts` + `src/sql-store.ts`，`node:sqlite` 零依赖、平迁 Postgres）：merchants/subscriptions/charges/usage_records/webhook_deliveries/idempotency_keys/locks 七表，按 `merchant_id` 硬隔离；`sqlStore`/`sqlBillerStore` 实现 `KeeperStore`/`BillerStore`（与 mem/file 同契约、插入式替换）。`store-smoke` **24 断言**（三实现等价 + 租户隔离 + 锁 + api-key 鉴权）。
 - **PAYG biller**（`src/biller.ts`）：计量→累计→单飞结算（clamp 到 caps、carry、幂等、跨实例锁）。**两轮对抗审查（~50 agent）：第一轮 7 确认 bug（3 critical 双花）全修；第二轮 0 确认**。`biller-smoke` **31 断言**（含 lost-ack/崩溃恢复 = `recoverOrphan` 对账重建、绝不重扣）。⚠️ **biller 至今只对 mock 链（FaithfulChain）跑过、未对真链验证** —— 打通时补。
-- **签名 webhook**（`src/webhook.ts`，子路径 `@isub/sdk/webhook`）：HMAC + 重试 + 死信 + `verifyWebhook`。`webhook-smoke` **13 断言**。语言无关接入的命门。
+- **签名 webhook**（`src/webhook.ts`，子路径 `@isubpay/sdk/webhook`）：HMAC + 重试 + 死信 + `verifyWebhook`。`webhook-smoke` **13 断言**。语言无关接入的命门。
 - **浏览器 signer**（`src/wallet-signer.ts`）：钱包签 + gRPC client 执行、复用同一归一化；dapp-kit 结构化适配，SDK 零前端依赖。
 
 ### Phase 2.1：Agent PAYG 打通 ✅（2026-06-16，纯 SDK/链下 + testnet 验证；方案见 `product-plan/agent-payg-wiring-plan.md`）
@@ -107,11 +107,11 @@
 - **D4 可嵌入"服务运行时"**（`node:http` 零依赖，内含接**真** `IsubClient` 的 biller + SQL + 后台 `run()` flush 循环）；demo 跑一个实例，多租户托管（SQL 已就位）留作产品化。
 - **D5 上 sponsored tx**（gasless charge，Sui-native 卖点）。⚠️ 引入 Enoki/gas-station 依赖 → **建议先打通裸循环、再 sponsor 那几笔 tx**，别让 gas-station 配置卡住打通。
 - **D6 用量先服务自报**（受 mandate 封顶），attestation/收据后议（F-05 边界）。
-- **MCP**：**打通测试不需要 MCP**（直调 agent 动词 + 服务 HTTP，确定性、可回归）；MCP 作可选 demo 层（agent 支付工具 / 服务暴露成 MCP tool），**打通后**为 demo 加。**已落地（2026-06-18）✅**：`src/mcp.ts`（`@isub/sdk/mcp`，低层 MCP `Server`，组合两面：钱包动词 `agentTools` + 按次计费 `query_*` 工具，凭证=mandateId 作工具入参）+ 确定性回归 `mcp-smoke` **12 断言**（真 MCP 协议走 `InMemoryTransport` + 真 `IsubService` 接 MockChain：发现/钱包/按次计费/预算 gate/403 凭证/协议错误）。真链 `mcp-e2e:testnet` 与 Claude Desktop `serveStdio` demo 留下一步。
+- **MCP**：**打通测试不需要 MCP**（直调 agent 动词 + 服务 HTTP，确定性、可回归）；MCP 作可选 demo 层（agent 支付工具 / 服务暴露成 MCP tool），**打通后**为 demo 加。**已落地（2026-06-18）✅**：`src/mcp.ts`（`@isubpay/sdk/mcp`，低层 MCP `Server`，组合两面：钱包动词 `agentTools` + 按次计费 `query_*` 工具，凭证=mandateId 作工具入参）+ 确定性回归 `mcp-smoke` **12 断言**（真 MCP 协议走 `InMemoryTransport` + 真 `IsubService` 接 MockChain：发现/钱包/按次计费/预算 gate/403 凭证/协议错误）。真链 `mcp-e2e:testnet` 与 Claude Desktop `serveStdio` demo 留下一步。
 **范围纪律（本轮不做）**：多租户 dashboard、用量 attestation、软风控、超出闭环所需的 REST 端点。
 **工时**：服务运行时 + 端点 ~1 天；testnet 端到端测试 ~半天；sponsor ~+0.5–1 天（后置）。
 **落地 + 验证（已完成裸循环，sponsor D5 仍后置）**：
-- `src/service.ts`（`IsubService`，子路径 `@isub/sdk/service`）：D1 凭证首用上链校验+自动登记、D2 信 biller 事件做拒服、D3 按剩余预算 gate + 窗口/阈值 flush、内嵌 `IsubBiller`(接真 `IsubClient`) + 薄 `node:http` `listen()`。
+- `src/service.ts`（`IsubService`，子路径 `@isubpay/sdk/service`）：D1 凭证首用上链校验+自动登记、D2 信 biller 事件做拒服、D3 按剩余预算 gate + 窗口/阈值 flush、内嵌 `IsubBiller`(接真 `IsubClient`) + 薄 `node:http` `listen()`。
 - **`wiring-e2e` testnet 全链路 15 断言绿**：agent.subscribe(真 mandate) → 带凭证 `service.use` ×N → `service.flush` → **真 `charge_metered` 扣款**(账户精确扣、merchant 精确收、seq 递增) → 预算耗尽 gate 402 → 撤销后 `#4` 扣不动。**这同时把"biller 只对 mock 链跑过"的洞补上了 —— biller 现已对真链验证。**
 - `service-smoke` 12 断言(凭证/gate/阈值/撤销停服,headless)。
 - **顺带修一个真 bug**：被撤销的 mandate 原先被 biller 误判为 `rate_limited`（暗示"稍后重试"）→ 改为显式 `not_billable`（服务据此停服）。biller-smoke 31 仍绿、无回归。

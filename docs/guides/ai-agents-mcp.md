@@ -7,8 +7,8 @@ The shape: a human funds an `Account` and defines an allow-list of services with
 ## `IsubAgent`
 
 ```typescript
-import { IsubAgent } from '@isub/sdk/agent';
-import { ChargeMode } from '@isub/sdk';
+import { IsubAgent } from '@isubpay/sdk/agent';
+import { ChargeMode } from '@isubpay/sdk';
 
 const agent = new IsubAgent(isub, sessionSigner, {
   accountId,                            // the human-funded account the agent draws from
@@ -37,8 +37,8 @@ const sub = await agent.subscribe({ service: 'gpu-api', budget: 200_000_000n, tt
 Expose iSub to an LLM (Claude Desktop, etc.) as MCP tools:
 
 ```typescript
-import { createIsubMcpServer } from '@isub/sdk/mcp';
-import { agentTools } from '@isub/sdk/agent';
+import { createIsubMcpServer } from '@isubpay/sdk/mcp';
+import { agentTools } from '@isubpay/sdk/agent';
 
 const server = createIsubMcpServer({
   // metered-payment tools, plus optional wallet/subscription tools backed by an agent:
@@ -53,7 +53,7 @@ The server advertises tools (list/call) for checking status, subscribing within 
 
 ## x402 & AP2
 
-iSub ships its own **x402** implementation (`@isub/sdk/x402`, V2-wire-compatible) with a custom **`mandate` scheme**. x402's stock `exact` scheme signs a fresh on-chain transfer per call; iSub's `mandate` scheme instead pays from a **standing, capped, revocable on-chain Mandate**, settled through the idempotent biller — so a single HTTP 402 round-trip carries a **recurring / metered** charge, not a one-shot transfer.
+iSub ships its own **x402** implementation (`@isubpay/sdk/x402`, V2-wire-compatible) with a custom **`mandate` scheme**. x402's stock `exact` scheme signs a fresh on-chain transfer per call; iSub's `mandate` scheme instead pays from a **standing, capped, revocable on-chain Mandate**, settled through the idempotent biller — so a single HTTP 402 round-trip carries a **recurring / metered** charge, not a one-shot transfer.
 
 Three faces — own types, no external dependency, interoperable by shape:
 
@@ -64,7 +64,7 @@ Three faces — own types, no external dependency, interoperable by shape:
 | Facilitator | `MandateFacilitator.verify()` / `.settle()` | cheap off-chain verify, then the single on-chain `charge_metered` |
 
 ```typescript
-import { buildPaymentRequirements, createMandatePayment, MandateFacilitator } from '@isub/sdk/x402';
+import { buildPaymentRequirements, createMandatePayment, MandateFacilitator } from '@isubpay/sdk/x402';
 ```
 
 **AP2 alignment.** Google's Agent Payments Protocol centers agentic commerce on signed **mandates with constraints**. iSub's `Mandate` *is* that object — a capped, revocable authorization — but enforced **on-chain**, not just attested. An AP2-style intent maps directly onto an iSub mandate, so the same authorization that backs a subscription backs an agent's x402 payments.

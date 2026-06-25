@@ -16,7 +16,7 @@ Contrast with Stripe (custodial token vault) or a streaming-payment lock-up (fun
 One account can back many mandates, and charges draw first-come-first-served. So a user's realistic worst case toward an account is **`min(balance, Σ remaining authorizations)`**. Surface it before the user signs another authorize:
 
 ```typescript
-import { accountExposure } from '@isub/sdk';
+import { accountExposure } from '@isubpay/sdk';
 
 const x = await accountExposure(isub, accountId, mandateIds);
 // {

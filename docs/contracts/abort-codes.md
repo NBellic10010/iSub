@@ -3,7 +3,7 @@
 Every guard in `isub::subscription` aborts with a numeric code. The SDK mirrors them in `ERROR_CODES` and decodes them with `errorName(code)` / `abortCodeOf(e)`.
 
 ```typescript
-import { ERROR_CODES, errorName, abortCodeOf } from '@isub/sdk';
+import { ERROR_CODES, errorName, abortCodeOf } from '@isubpay/sdk';
 errorName(8);        // 'EOverRateCap'
 abortCodeOf(err);    // 8 | null
 ```

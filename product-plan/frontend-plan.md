@@ -8,12 +8,12 @@
 - **支付弹窗**:独立可嵌入 widget(商家在自己站点嵌入),**iframe 隔离**承载"可信展示"。
 
 ## 1. 仓库结构(npm/pnpm workspaces)
-现有:`contracts/` · `sdk/`(`@isub/sdk`)· `demo/`(原型,毕业到下面两个)。新增:
+现有:`contracts/` · `sdk/`(`@isubpay/sdk`)· `demo/`(原型,毕业到下面两个)。新增:
 ```
 web/        Next.js 全栈:首页 + 用户端 + 商家端 + 服务端路由(zkLogin/SIWS/商家 API)
 checkout/   独立可嵌入 widget(iSub Checkout):iframe 宿主 + <script> 加载器
 ```
-用 workspaces 让 `web`/`checkout` 干净地 `import @isub/sdk`(Next 下不沿用 demo 的 vite-alias,用 workspace 依赖)。`demo/` 留作参考,逻辑(walletSigner 桥接、`useIsub`、`signMessage`)移植进 `web`/`checkout`。
+用 workspaces 让 `web`/`checkout` 干净地 `import @isubpay/sdk`(Next 下不沿用 demo 的 vite-alias,用 workspace 依赖)。`demo/` 留作参考,逻辑(walletSigner 桥接、`useIsub`、`signMessage`)移植进 `web`/`checkout`。
 
 ## 2. 路由树(web/,App Router)
 ```

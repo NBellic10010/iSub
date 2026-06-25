@@ -49,7 +49,7 @@ await isub.charge(keeper, { accountId, mandateId, amount: 50_000_000n });
 Hand the mandate to an `IsubKeeper`, which tracks due mandates and runs the dunning state machine (`past_due → recovered | lapsed`):
 
 ```typescript
-import { IsubKeeper } from '@isub/sdk';
+import { IsubKeeper } from '@isubpay/sdk';
 
 const keeperLoop = new IsubKeeper(isub, keeper, [mandateId], {
   onEvent: (e) => console.log(e.type, e.mandateId),

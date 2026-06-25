@@ -1,5 +1,5 @@
 // Managed e2e — the acceptance test for "接入即用、不 self-host". A "merchant backend"
-// uses ONLY @isub/sdk/client (api-key + use + verifyWebhook) against a running IsubGateway;
+// uses ONLY @isubpay/sdk/client (api-key + use + verifyWebhook) against a running IsubGateway;
 // an agent subscribes; the gateway (iSub keeper key) settles on the REAL chain; funds land
 // in the merchant's payout address. The merchant section touches NO IsubService / biller /
 // DB / chain / charge-signing — that's the whole point.
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
   await gateway.stop();
   receiver.close();
   console.log(`\n✅ managed e2e passed — ${checks} assertions on ${NETWORK}`);
-  console.log('  商家后端全程只用 @isub/sdk/client(api-key + use + verifyWebhook)—— 零 IsubService/biller/DB/签名');
+  console.log('  商家后端全程只用 @isubpay/sdk/client(api-key + use + verifyWebhook)—— 零 IsubService/biller/DB/签名');
   console.log(`• explorer  mandate ${ex.object(mandateId)}`);
 }
 

@@ -109,7 +109,7 @@ recovery/price-freeze logic creates a second home for money bugs.
 
 ### (C) ADAPTER / FACADE over the existing interface  ✅ RECOMMENDED
 
-Ship `@isub/sdk/x402` (and an AP2 resolver) as a node-only shell — a sibling to `mcp.ts`
+Ship `@isubpay/sdk/x402` (and an AP2 resolver) as a node-only shell — a sibling to `mcp.ts`
 and `gateway.ts` — that consumes the unchanged `MeteredService` slice and translates
 protocol shapes. Existing callers unchanged; everything new is additive.
 
@@ -136,7 +136,7 @@ protocol shapes. Existing callers unchanged; everything new is additive.
   signature = x402 X-PAYMENT / AP2 Cart Mandate. `consent.ts` is already the AP2 VC envelope.
 - **Testability: best.** The adapter is unit-tested against a mock `MeteredService` exactly
   as `mcp.ts` is; the biller's crash/orphan suite is untouched and still covers the money path.
-- **Maintenance: best.** New subpath export (`@isub/sdk/x402`) mirroring the existing layered
+- **Maintenance: best.** New subpath export (`@isubpay/sdk/x402`) mirroring the existing layered
   shells (`index.ts:18-23`); billing fixes land once, in the core, and both protocols inherit.
 - **Non-custody preserved.** PaymentRequirements are *derived from the on-chain mandate*
   (`payTo = mandate.merchant`, `asset = coinType`, `maxAmountRequired <= spendableNow`), not
@@ -196,11 +196,11 @@ This lens alone selects **C**.
 ## Recommendation
 
 Build the x402/AP2 integration as **Option C: an additive adapter/facade shell**
-(`@isub/sdk/x402` + an AP2 resolver), sibling to `mcp.ts`/`gateway.ts`, consuming the
+(`@isubpay/sdk/x402` + an AP2 resolver), sibling to `mcp.ts`/`gateway.ts`, consuming the
 unchanged `MeteredService` slice. **Do not modify `service.ts`, `biller.ts`, or `client.ts`.**
 
 Concretely:
-1. New subpath export `@isub/sdk/x402` mirroring the existing layered shells (`index.ts:18-23`).
+1. New subpath export `@isubpay/sdk/x402` mirroring the existing layered shells (`index.ts:18-23`).
 2. New `/x402/verify` and `/x402/settle` (and an AP2 cart endpoint) as additive branches in
    the gateway dispatcher, ordered most-specific-first (`gateway.ts:148` ordering trap), each
    funneling into the in-process `use()/useMetered()` that already thread `proof?`.

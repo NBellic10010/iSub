@@ -11,7 +11,7 @@ driven entirely by a connected wallet:
    does this on schedule).
 5. **Unsubscribe** — revoke on-chain; no future charges.
 
-It reuses the **same `@isub/sdk` seam** the keeper, CLI, and smoke tests use. The only
+It reuses the **same `@isubpay/sdk` seam** the keeper, CLI, and smoke tests use. The only
 browser-specific piece is the wallet bridge in [`src/isub.ts`](src/isub.ts) — about 15 lines
 that turn dApp-kit's connected wallet into an `IsubSigner`. `<ConnectButton/>` is the login UI.
 

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ConnectButton } from '@mysten/dapp-kit-react/ui';
-import { ChargeMode, errorName, abortCodeOf, type PlanState } from '@isub/sdk';
+import { ChargeMode, errorName, abortCodeOf, type PlanState } from '@isubpay/sdk';
 import { useIsub } from '@/lib/use-isub';
 import { fmtSui, toMist, shortId } from '@/lib/format';
 import { Card, Badge, Button, AddressChip } from '@/components/ui';

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ConnectButton } from '@mysten/dapp-kit-react/ui';
-import { MandateStatus, ChargeMode, errorName, abortCodeOf, accountExposure, type MandateState, type PlanState } from '@isub/sdk';
+import { MandateStatus, ChargeMode, errorName, abortCodeOf, accountExposure, type MandateState, type PlanState } from '@isubpay/sdk';
 import { useIsub } from '@/lib/use-isub';
 import { fmtSui, toMist, shortId, DAY_MS } from '@/lib/format';
 import { Card, Metric, Badge, Button, AddressChip } from '@/components/ui';

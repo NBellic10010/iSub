@@ -1,4 +1,4 @@
-// `@isub/sdk/client` — the THIN client a merchant imports to use the MANAGED gateway.
+// `@isubpay/sdk/client` — the THIN client a merchant imports to use the MANAGED gateway.
 //
 // This is the whole merchant-side surface: an api-key, three calls, and a webhook
 // verifier. NO heavy deps (no IsubClient / keeper / biller / DB / chain) — just HTTP
@@ -23,7 +23,7 @@ export interface SubscriptionStatus {
 }
 
 // Relationship-index rows as carried over HTTP — every on-chain u64 is a decimal STRING
-// (JSON has no bigint; wrap with BigInt() where you need arithmetic). Mirrors `@isub/sdk/relations`.
+// (JSON has no bigint; wrap with BigInt() where you need arithmetic). Mirrors `@isubpay/sdk/relations`.
 export interface PlanRowJson {
   planId: string; merchant: string; mode: number;
   price: string; intervalMs: string; rateCap: string; rateWindowMs: string;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ConnectButton } from '@mysten/dapp-kit-react/ui';
-import { MandateStatus, errorName, abortCodeOf, buildConsent } from '@isub/sdk';
-import type { MandateState, PlanState, Consent, AuthorizeFixedArgs } from '@isub/sdk';
+import { MandateStatus, errorName, abortCodeOf, buildConsent } from '@isubpay/sdk';
+import type { MandateState, PlanState, Consent, AuthorizeFixedArgs } from '@isubpay/sdk';
 import { useIsub } from './isub';
 
 const MIST = 1_000_000_000n;

@@ -1,12 +1,41 @@
 {
-  "name": "@isub/sdk",
+  "name": "@isubpay/sdk",
   "version": "0.0.1",
-  "private": true,
+  "private": false,
   "type": "module",
-  "description": "iSub — non-custodial recurring/metered pull-payment primitive on Sui. TS SDK + runnable scripts (e2e smoke, keeper).",
+  "description": "iSub — non-custodial recurring/metered pull-payment primitive on Sui. TS SDK for subscriptions (Fixed), pay-as-you-go (PAYG), x402 mandate scheme, and MCP agent payments.",
+  "license": "MIT",
+  "homepage": "https://github.com/NBellic10010/iSub/tree/main/sdk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NBellic10010/iSub.git",
+    "directory": "sdk"
+  },
+  "keywords": [
+    "sui",
+    "payments",
+    "subscriptions",
+    "metered",
+    "pay-as-you-go",
+    "x402",
+    "mcp",
+    "ai-agents",
+    "non-custodial",
+    "pull-payment",
+    "mandate"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22.5.0"
   },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "files": [
+    "src",
+    "README.md"
+  ],
   "exports": {
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",

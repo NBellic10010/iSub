@@ -5,7 +5,7 @@ import { fileURLToPath, URL } from 'node:url';
 
 // The demo consumes the SDK's TypeScript source directly (no build step) via an alias.
 // Only the core barrel is used in the browser — it's isomorphic (no node: imports);
-// the node-only subpaths (@isub/sdk/store-file, /webhook) are never imported here.
+// the node-only subpaths (@isubpay/sdk/store-file, /webhook) are never imported here.
 export default defineConfig({
   // Sui wallets (Slush etc.) require a SECURE CONTEXT to connect — http://localhost is
   // rejected as "connection not secure". basicSsl() serves dev over https with a
@@ -14,7 +14,7 @@ export default defineConfig({
   plugins: [react(), basicSsl()],
   resolve: {
     alias: {
-      '@isub/sdk': fileURLToPath(new URL('../sdk/src/index.ts', import.meta.url)),
+      '@isubpay/sdk': fileURLToPath(new URL('../sdk/src/index.ts', import.meta.url)),
     },
     // CRITICAL: collapse to a single @mysten/sui (and React) copy across BOTH the demo
     // and the aliased SDK source. Without this, a `Transaction` built inside the SDK

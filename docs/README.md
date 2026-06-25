@@ -9,7 +9,7 @@ description: Non-custodial recurring & metered pull-payments on Sui — the paym
 It is the Sui-native equivalent of "a card on file" — without the custody. Stripe can auto-renew because it holds a token for your card. Non-custodial crypto wallets normally can't: the stablecoin sits in the user's wallet and the merchant has no way to pull a recurring fee without a fresh signature every time. iSub closes that gap with Sui's object model.
 
 ```typescript
-import { IsubClient, keypairSigner } from '@isub/sdk';
+import { IsubClient, keypairSigner } from '@isubpay/sdk';
 
 const isub = new IsubClient({ client, packageId });
 
@@ -50,7 +50,7 @@ await isub.chargeMetered(keeper, { accountId, mandateId, amount: 10_000_000n, se
 | A merchant selling subscriptions or metered APIs | [`createPlanFixed` / `createPlanPayg`](reference/isub-client.md), the [checkout widget](guides/checkout-widget.md), and the [biller](guides/billing-automation.md) |
 | A subscriber / wallet | [`openAccount` → `deposit` → `authorize*`](guides/subscriptions-fixed.md) |
 | Building an AI agent that pays per call | [`IsubAgent`, x402 (`mandate` scheme) + the MCP server](guides/ai-agents-mcp.md) — x402-native, AP2-aligned |
-| An operator who wants "integrate-and-go" without self-hosting a keeper | The [managed gateway](guides/managed-gateway.md) + the thin [`@isub/sdk/client`](reference/gateway-api.md) |
+| An operator who wants "integrate-and-go" without self-hosting a keeper | The [managed gateway](guides/managed-gateway.md) + the thin [`@isubpay/sdk/client`](reference/gateway-api.md) |
 
 ## How the pieces fit
 

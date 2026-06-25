@@ -9,7 +9,7 @@ managed-first / hackathon scope — almost everything is created through our own
 to "catch outside our surfaces" yet. So we built the first half and deferred the second.
 
 **Shipped:**
-- `@isub/sdk/relations` — `IsubIndex` (write-time capture: `ingestPlan` / `ingestMandate` (auto-captures the
+- `@isubpay/sdk/relations` — `IsubIndex` (write-time capture: `ingestPlan` / `ingestMandate` (auto-captures the
   account) / `ingestAccount`, each RE-DERIVED from a chain point-read; reads: `plansByMerchant`,
   `mandatesByMerchant`, `mandatesBySubscriber` (cross-merchant), `mandatesByPlan` (the plan↔user mapping),
   `accountsByOwner`, `mandate`). READ-ONLY projection; keeper/biller never read it (hot-path invariant intact).
@@ -18,7 +18,7 @@ to "catch outside our surfaces" yet. So we built the first half and deferred the
 - `sdk/src/gateway.ts` routes: `POST /index/plan|mandate` (api-key, re-derives), `GET /plans` · `GET /mandates`
   (api-key → your address), public `GET /relations/mandates?plan=|subscriber=|merchant=` · `/relations/plans`
   · `/relations/accounts` (address-keyed; on-chain-public data). Bigints serialized as decimal strings.
-- `@isub/sdk/client` one-call API: `indexPlan` / `indexMandate` / `listPlans` / `listMandates` /
+- `@isubpay/sdk/client` one-call API: `indexPlan` / `indexMandate` / `listPlans` / `listMandates` /
   `mandatesByPlan` / `mandatesBySubscriber` / `accountsByOwner`.
 - `web/lib/gateway.ts` seam wired (`listPlans` / `listMandates` / `mandatesByPlan` no longer throw `todo`).
 - Tests: `npm run relations:smoke` (20, index unit) + `npm run relations-http:smoke` (12, thin client →
@@ -117,7 +117,7 @@ Auth: merchant routes behind the **SIWS session** (= merchant address). Subscrib
 
 ## 8. For the executing session
 - Load skill **`accessing-data`** → `grpc.md` (subscription_service / SuiGrpcClient streaming), `graphql.md` (events filtered pagination + read-after-write), `indexers.md` (sui-indexer-alt if scaling). Confirm exact APIs there — do not guess subscription/method names.
-- Reuse: `@isub/sdk` reads (`getPlan`/`getMandate`/`getMandatesResolved`/`getAccount`), `sdk/src/db.ts` (migration runner + SQLite), `sdk/src/sql-store.ts` (tenant store patterns), `sdk/src/gateway.ts` (HTTP front), `web/lib/gateway.ts` (the typed seam — TODO methods to implement).
+- Reuse: `@isubpay/sdk` reads (`getPlan`/`getMandate`/`getMandatesResolved`/`getAccount`), `sdk/src/db.ts` (migration runner + SQLite), `sdk/src/sql-store.ts` (tenant store patterns), `sdk/src/gateway.ts` (HTTP front), `web/lib/gateway.ts` (the typed seam — TODO methods to implement).
 - Keep the keeper's "no event query on the hot path" invariant intact — the indexer is a SEPARATE component; querying events there is correct.
 
 ## 9. Open decisions

@@ -9,18 +9,18 @@
 ## Install
 
 ```bash
-npm install @isub/sdk @mysten/sui
+npm install @isubpay/sdk @mysten/sui
 ```
 
 `@mysten/sui` is a peer dependency — the SDK builds transactions with it and you construct the gRPC client with it.
 
-> In the iSub monorepo the SDK is the workspace package `@isub/sdk` (root `package.json` `workspaces: ["sdk", "web", "checkout"]`), which hoists a single copy of `@mysten/sui`. A web app consumes it with `transpilePackages: ['@isub/sdk']` in `next.config.ts`.
+> In the iSub monorepo the SDK is the workspace package `@isubpay/sdk` (root `package.json` `workspaces: ["sdk", "web", "checkout"]`), which hoists a single copy of `@mysten/sui`. A web app consumes it with `transpilePackages: ['@isubpay/sdk']` in `next.config.ts`.
 
 ## Construct a client
 
 ```typescript
 import { SuiGrpcClient } from '@mysten/sui/grpc';
-import { IsubClient } from '@isub/sdk';
+import { IsubClient } from '@isubpay/sdk';
 
 const client = new SuiGrpcClient({
   network: 'testnet',
@@ -42,16 +42,16 @@ The package is split so you only pull in what you use:
 
 | Import | Contents |
 | --- | --- |
-| `@isub/sdk` | `IsubClient`, signers, types, constants, errors, pricing, `IsubKeeper`, `accountExposure`, `scheduleLag`, … |
-| `@isub/sdk/agent` | `IsubAgent`, `agentTools` (budget-bounded agent spending) |
-| `@isub/sdk/biller` | `IsubBiller` (PAYG usage → metered charges) |
-| `@isub/sdk/gateway` | `IsubGateway` (managed multi-tenant HTTP gateway) |
-| `@isub/sdk/relations` | `IsubIndex` (off-chain relationship index) |
-| `@isub/sdk/client` | `IsubServiceClient`, `verifyWebhook` (thin client → gateway) |
-| `@isub/sdk/mcp` | `createIsubMcpServer` (Model Context Protocol server) |
-| `@isub/sdk/x402` | x402 (seller · buyer · facilitator), the `mandate` scheme — agent payments |
-| `@isub/sdk/sql-store` · `/db` · `/store-file` | persistence backends |
-| `@isub/sdk/webhook` · `/service` | webhook signing/verifying, single-tenant service |
+| `@isubpay/sdk` | `IsubClient`, signers, types, constants, errors, pricing, `IsubKeeper`, `accountExposure`, `scheduleLag`, … |
+| `@isubpay/sdk/agent` | `IsubAgent`, `agentTools` (budget-bounded agent spending) |
+| `@isubpay/sdk/biller` | `IsubBiller` (PAYG usage → metered charges) |
+| `@isubpay/sdk/gateway` | `IsubGateway` (managed multi-tenant HTTP gateway) |
+| `@isubpay/sdk/relations` | `IsubIndex` (off-chain relationship index) |
+| `@isubpay/sdk/client` | `IsubServiceClient`, `verifyWebhook` (thin client → gateway) |
+| `@isubpay/sdk/mcp` | `createIsubMcpServer` (Model Context Protocol server) |
+| `@isubpay/sdk/x402` | x402 (seller · buyer · facilitator), the `mandate` scheme — agent payments |
+| `@isubpay/sdk/sql-store` · `/db` · `/store-file` | persistence backends |
+| `@isubpay/sdk/webhook` · `/service` | webhook signing/verifying, single-tenant service |
 
 ## Networks & package ids
 

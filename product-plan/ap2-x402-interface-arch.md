@@ -10,7 +10,7 @@
 > 不破坏 billing **逻辑**(200/402/403 三态、accrue-then-batch-settle、`charge_seq` 幂等、`recoverOrphan`、price-freeze、single-biller lock 全部一行不改),但"`service.ts`/`biller.ts`/`client.ts` 100% byte-for-byte untouched"这句**是站不住的、必须收回**——adapter 按设计要落地,至少需要在 `IsubService` 上**新增 4 个不改变任何现有 caller 行为的 public 方法/拓宽 1 个返回类型**(下文 §4/§5 点名)。
 
 **(b) 另起一套接口,还是适配现有?**
-> 适配现有:新建**独立 adapter 模块** `@isub/sdk/x402` + `@isub/sdk/ap2`,作为 `mcp.ts`/`gateway.ts` 的 sibling 去 wrap 现有 core;**绝不**另起第二套 settlement 栈(那等于复制整个 money-correctness core,是显式 anti-goal)。
+> 适配现有:新建**独立 adapter 模块** `@isubpay/sdk/x402` + `@isubpay/sdk/ap2`,作为 `mcp.ts`/`gateway.ts` 的 sibling 去 wrap 现有 core;**绝不**另起第二套 settlement 栈(那等于复制整个 money-correctness core,是显式 anti-goal)。
 
 ---
 
@@ -55,7 +55,7 @@ agent 的签名是对 iSub 专有串 `callMessage()`(`isub-call-v1\nmandate=…\
 core(`IsubService`+`IsubBiller`+`IsubClient`)= hexagon;x402/AP2 = 与 mcp/gateway 并列的两张 protocol face。
 
 ```
-   mcp.ts   gateway.ts   @isub/sdk/x402(NEW)   @isub/sdk/ap2(NEW)
+   mcp.ts   gateway.ts   @isubpay/sdk/x402(NEW)   @isubpay/sdk/ap2(NEW)
       │          │              │                    │
       └──────────┴── PORT: MeteredService.use/useMetered ──┘   (mcp.ts:35-38)
                          │

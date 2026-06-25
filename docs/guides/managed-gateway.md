@@ -11,9 +11,9 @@ your backend ──api-key HTTP──▶ IsubGateway ──keeper signs──▶
 ## Run a gateway (operator side)
 
 ```typescript
-import { IsubGateway } from '@isub/sdk/gateway';
-import { openDb } from '@isub/sdk/db';
-import { registerMerchant } from '@isub/sdk/sql-store';
+import { IsubGateway } from '@isubpay/sdk/gateway';
+import { openDb } from '@isubpay/sdk/db';
+import { registerMerchant } from '@isubpay/sdk/sql-store';
 
 const db = openDb('isub-index.testnet.db');
 registerMerchant(db, { id: 'acme', name: 'Acme Cloud', apiKey: 'sk_…', payoutAddress: merchant.address });
@@ -37,7 +37,7 @@ The repo ships this as `npm run gateway:serve` / `gateway-serve:testnet` (`PORT`
 Your backend never imports `IsubClient`, a biller, a DB, or a signer — just the thin client:
 
 ```typescript
-import { IsubServiceClient, verifyWebhook } from '@isub/sdk/client';
+import { IsubServiceClient, verifyWebhook } from '@isubpay/sdk/client';
 
 const backend = new IsubServiceClient({ baseUrl: 'https://gateway…', apiKey: 'sk_…' });
 
@@ -56,7 +56,7 @@ const st = await backend.status(mandateId);   // { serviceable, … } | null
 The gateway delivers signed events (e.g. `charge.succeeded`) to your `webhook.url`. Verify them:
 
 ```typescript
-import { verifyWebhook } from '@isub/sdk/client';
+import { verifyWebhook } from '@isubpay/sdk/client';
 
 app.post('/wh', (req, res) => {
   const ok = verifyWebhook({ secret: 'whsec_…', body: rawBody, signatureHeader: req.headers['isub-signature'] });
@@ -66,7 +66,7 @@ app.post('/wh', (req, res) => {
 
 ## Relationship index
 
-gRPC can't enumerate **shared** objects by owner, so the gateway maintains an off-chain index (`IsubIndex`, `@isub/sdk/relations`) capturing relationships at write time and re-deriving each row from a chain point-read:
+gRPC can't enumerate **shared** objects by owner, so the gateway maintains an off-chain index (`IsubIndex`, `@isubpay/sdk/relations`) capturing relationships at write time and re-deriving each row from a chain point-read:
 
 * `merchant → plans`, `subscriber → mandates` (cross-merchant), `plan → mandates`, `owner → accounts`
 * per-mandate `usage` and `charges` series (what the dashboard's usage chart reads)
@@ -77,4 +77,4 @@ It's a **read-only projection** — the keeper/biller never read it on the hot p
 
 ## Acceptance test
 
-`npm run managed-e2e` (or `:testnet`) is the executable spec: a merchant backend using **only** `@isub/sdk/client` (api-key + `use` + `verifyWebhook`), an agent that subscribes, the gateway settling on the real chain into the merchant's payout — with the merchant section touching no `IsubService`/biller/DB/signing at all.
+`npm run managed-e2e` (or `:testnet`) is the executable spec: a merchant backend using **only** `@isubpay/sdk/client` (api-key + `use` + `verifyWebhook`), an agent that subscribes, the gateway settling on the real chain into the merchant's payout — with the merchant section touching no `IsubService`/biller/DB/signing at all.

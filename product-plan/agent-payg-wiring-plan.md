@@ -76,7 +76,7 @@
 ### 5.2 MCP（测试是否需要）
 **打通测试不需要 MCP** —— 直调 `IsubAgent` 动词 + 服务 HTTP,确定性、可回归;MCP 引入 LLM 不确定性,不适合正确性测试。**MCP 作可选 demo 层**(agent 支付工具 / 服务暴露成 MCP tool),**打通后**为"agent 原生付费"演示再加。
 
-> **现状(2026-06-18)**:MCP demo 层已落地。`src/mcp.ts`(`@isub/sdk/mcp`,低层 MCP `Server`,一个 server 组合两面:钱包动词 `agentTools` + 按次计费 `query_*` 工具;凭证=mandateId 作工具入参,LLM 自己 subscribe→拿 id→query 串联)。确定性回归 `scripts/mcp-smoke.ts`(`npm run mcp:smoke`):真 MCP 协议走 `InMemoryTransport`(真 SDK Client↔Server,无 LLM)+ 真 `IsubService` 接 MockChain,**12 断言**(发现/钱包/按次计费/预算 gate 402/凭证 403/协议错误)。这正是 §5.2 说的"确定性、可回归"——MCP 协议层真、链下 mock,无需 LLM。真链验证(`mcp-e2e:testnet`)与 Claude Desktop 现场 demo(`serveStdio` 入口)留作下一步。
+> **现状(2026-06-18)**:MCP demo 层已落地。`src/mcp.ts`(`@isubpay/sdk/mcp`,低层 MCP `Server`,一个 server 组合两面:钱包动词 `agentTools` + 按次计费 `query_*` 工具;凭证=mandateId 作工具入参,LLM 自己 subscribe→拿 id→query 串联)。确定性回归 `scripts/mcp-smoke.ts`(`npm run mcp:smoke`):真 MCP 协议走 `InMemoryTransport`(真 SDK Client↔Server,无 LLM)+ 真 `IsubService` 接 MockChain,**12 断言**(发现/钱包/按次计费/预算 gate 402/凭证 403/协议错误)。这正是 §5.2 说的"确定性、可回归"——MCP 协议层真、链下 mock,无需 LLM。真链验证(`mcp-e2e:testnet`)与 Claude Desktop 现场 demo(`serveStdio` 入口)留作下一步。
 
 ## 6. 验收：一条 testnet 端到端测试
 

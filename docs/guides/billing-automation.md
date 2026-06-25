@@ -12,8 +12,8 @@ Both take an `IsubSigner` that must be the mandate's **merchant or authorized ke
 ## The keeper (Fixed)
 
 ```typescript
-import { IsubKeeper, keypairSigner } from '@isub/sdk';
-import { fileStore } from '@isub/sdk/store-file';
+import { IsubKeeper, keypairSigner } from '@isubpay/sdk';
+import { fileStore } from '@isubpay/sdk/store-file';
 
 const keeper = new IsubKeeper(isub, signer, [mandateId1, mandateId2], {
   store: fileStore('./.keeper/testnet'),  // durable watch set + journal; survives restarts
@@ -34,9 +34,9 @@ await keeper.run({ pollMs: 1000, signal: ac.signal });
 ## The biller (PAYG)
 
 ```typescript
-import { IsubBiller } from '@isub/sdk/biller';
-import { openDb } from '@isub/sdk/db';
-import { sqlBillerStore } from '@isub/sdk/sql-store';
+import { IsubBiller } from '@isubpay/sdk/biller';
+import { openDb } from '@isubpay/sdk/db';
+import { sqlBillerStore } from '@isubpay/sdk/sql-store';
 
 const db = openDb('isub-index.testnet.db');
 const store = sqlBillerStore(db, 'acme');           // tenant-scoped, idempotent

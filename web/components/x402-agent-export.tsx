@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { bindMessage, type MandateState } from '@isub/sdk';
+import { bindMessage, type MandateState } from '@isubpay/sdk';
 import { PACKAGE_IDS } from '@/lib/dapp-kit';
 import { Button } from '@/components/ui';
 

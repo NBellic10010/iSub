@@ -15,4 +15,4 @@ RUN npm install
 COPY . .
 ENV ISUB_NETWORK=testnet
 EXPOSE 4100
-CMD ["sh", "-c", "PORT=${PORT:-4100} npm run backend -w @isub/sdk"]
+CMD ["sh", "-c", "PORT=${PORT:-4100} npm run backend -w @isubpay/sdk"]

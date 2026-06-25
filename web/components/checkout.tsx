@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { ConnectButton } from '@mysten/dapp-kit-react/ui';
-import { ChargeMode, errorName, abortCodeOf, type PlanState } from '@isub/sdk';
+import { ChargeMode, errorName, abortCodeOf, type PlanState } from '@isubpay/sdk';
 import { useIsub } from '@/lib/use-isub';
 import { fmtSui, toMist, shortId, DAY_MS } from '@/lib/format';
 import { Button, Badge, AddressChip } from '@/components/ui';

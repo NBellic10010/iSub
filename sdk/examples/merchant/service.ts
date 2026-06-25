@@ -10,7 +10,7 @@
 //   ISUB_BASE_URL=https://gateway.isub.dev ISUB_API_KEY=sk_live_xxx \
 //   ISUB_WEBHOOK_SECRET=whsec_xxx PORT=3000 npx tsx examples/merchant/service.ts
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { IsubServiceClient, verifyWebhook } from '@isub/sdk/client';
+import { IsubServiceClient, verifyWebhook } from '@isubpay/sdk/client';
 
 // ── config you get from iSub (api key + webhook secret) ──
 const BASE_URL = process.env.ISUB_BASE_URL ?? 'http://127.0.0.1:8787';

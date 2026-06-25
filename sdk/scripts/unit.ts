@@ -158,8 +158,8 @@ async function testKeeperNotBefore(): Promise<void> {
 }
 
 // ===== decoupling: the core barrel must stay Node-dependency-free (isomorphic) =====
-// Browser / agent consumers import the core (`@isub/sdk`); only the declared Node
-// shells — the server-only SUBPATH modules (@isub/sdk/store-file, /webhook, /db,
+// Browser / agent consumers import the core (`@isubpay/sdk`); only the declared Node
+// shells — the server-only SUBPATH modules (@isubpay/sdk/store-file, /webhook, /db,
 // /sql-store, /service, /gateway, /mcp, /x402), none re-exported from the index — may touch node:*.
 // This guard fails if any OTHER src file imports node:*, so the index can't silently
 // pull a Node dependency and break browser bundling.

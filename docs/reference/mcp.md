@@ -1,10 +1,10 @@
 # MCP server
 
-`@isub/sdk/mcp` exposes iSub to LLMs as **Model Context Protocol** tools, so an agent can check status, subscribe within policy, and pay per call — autonomously, but bounded by a human-set allow-list and the on-chain mandate caps.
+`@isubpay/sdk/mcp` exposes iSub to LLMs as **Model Context Protocol** tools, so an agent can check status, subscribe within policy, and pay per call — autonomously, but bounded by a human-set allow-list and the on-chain mandate caps.
 
 ```typescript
-import { createIsubMcpServer } from '@isub/sdk/mcp';
-import { IsubAgent, agentTools } from '@isub/sdk/agent';
+import { createIsubMcpServer } from '@isubpay/sdk/mcp';
+import { IsubAgent, agentTools } from '@isubpay/sdk/agent';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 const agent = new IsubAgent(isub, sessionSigner, { accountId, allowed: [/* AllowedService[] */] });

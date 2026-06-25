@@ -2,7 +2,7 @@
 import { useMemo } from 'react';
 import { useCurrentAccount, useCurrentNetwork, useDAppKit } from '@mysten/dapp-kit-react';
 import { SuiGrpcClient } from '@mysten/sui/grpc';
-import { IsubClient, walletSigner, type IsubSigner } from '@isub/sdk';
+import { IsubClient, walletSigner, type IsubSigner } from '@isubpay/sdk';
 import { GRPC_URLS, PACKAGE_IDS } from './dapp-kit';
 
 export interface IsubHandle {

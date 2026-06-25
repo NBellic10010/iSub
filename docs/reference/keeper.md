@@ -3,7 +3,7 @@
 A long-running charger for **Fixed** subscriptions. It watches a set of mandates, charges due ones, and runs a dunning state machine (`active → past_due → recovered | lapsed`) with a durable store.
 
 ```typescript
-import { IsubKeeper } from '@isub/sdk';
+import { IsubKeeper } from '@isubpay/sdk';
 
 const keeper = new IsubKeeper(isub, signer, watch?, opts?);
 ```
@@ -38,7 +38,7 @@ await keeper.run({ pollMs: 1000, signal });   // poll + charge due mandates unti
 ## Persistence
 
 ```typescript
-import { fileStore } from '@isub/sdk/store-file';
+import { fileStore } from '@isubpay/sdk/store-file';
 const store = fileStore('./.keeper/testnet'); // JSON-backed tracks + journal + lock
 ```
 

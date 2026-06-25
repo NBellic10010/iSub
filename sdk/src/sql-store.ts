@@ -3,7 +3,7 @@
 // many merchants share one database with hard row-level isolation. Drop-in replacement
 // for memoryStore/fileStore — same interface, the keeper code doesn't change.
 //
-// Server-only — import `@isub/sdk/sql-store`.
+// Server-only — import `@isubpay/sdk/sql-store`.
 import { createHash } from 'node:crypto';
 import { hostname } from 'node:os';
 import type { Db } from './db';

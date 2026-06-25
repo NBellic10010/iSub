@@ -23,7 +23,7 @@ iSub 替商家扣款,但**碰不到钱**:Fixed charge permissionless、PAYG 把 
 - **后台 flush 循环**:网关跑(`IsubService.start()` 已有)。
 - **webhook 投递**:复用已建的 dispatcher,投给商家 endpoint。
 - **端点**:`POST /usage`(=use)、`GET /subscriptions/:id`、`POST /refunds`、(可选)`POST /plans`。
-- **瘦 client SDK(`@isub/sdk/client`)**:`use` / `status` / `verifyWebhook` 几个 HTTP 封装;其他语言给 OpenAPI。
+- **瘦 client SDK(`@isubpay/sdk/client`)**:`use` / `status` / `verifyWebhook` 几个 HTTP 封装;其他语言给 OpenAPI。
 
 > 关键:网关是 `IsubService` 的**薄外壳** —— 难的部分(wiring、biller、链上、不双花)已经做完测完。Managed 主要是"多租户 + 对外 HTTP + 瘦 client"。
 
@@ -44,7 +44,7 @@ iSub 替商家扣款,但**碰不到钱**:Fixed charge permissionless、PAYG 把 
 **不做(本轮)**:dashboard UI、sponsored gas、OpenAPI 多语言客户端、前端组件(Phase 2)。
 
 ## 7. 验收(满足才算"接入即用")
-一条测试:一个"商家"**只用 `@isub/sdk/client`**(api-key + `use` + `verifyWebhook`)对接一个**跑着的 iSub 网关**,agent 订阅后在 **testnet 真被扣款**;商家侧代码里**没有 `IsubService` / biller / DB / 扣款签名**。
+一条测试:一个"商家"**只用 `@isubpay/sdk/client`**(api-key + `use` + `verifyWebhook`)对接一个**跑着的 iSub 网关**,agent 订阅后在 **testnet 真被扣款**;商家侧代码里**没有 `IsubService` / biller / DB / 扣款签名**。
 
 ## 8. 工作拆解(估时,1 人)
 

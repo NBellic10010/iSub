@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "description": "iSub wallet-connect demo dApp — connect a Sui wallet (login), open an Account, subscribe to a plan, trigger a charge, and cancel — all non-custodially through the same @isub/sdk seam the keeper/CLI use.",
+  "description": "iSub wallet-connect demo dApp — connect a Sui wallet (login), open an Account, subscribe to a plan, trigger a charge, and cancel — all non-custodially through the same @isubpay/sdk seam the keeper/CLI use.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

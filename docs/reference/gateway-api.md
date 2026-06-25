@@ -1,6 +1,6 @@
 # Gateway HTTP API
 
-The routes served by `IsubGateway` (`@isub/sdk/gateway`). Two access tiers:
+The routes served by `IsubGateway` (`@isubpay/sdk/gateway`). Two access tiers:
 
 * **api-key** routes (header `x-isub-api-key: sk_…`) — a merchant's managed billing path.
 * **public, address-keyed** routes — on-chain-public relationship/usage data for wallets (no key). All responses include permissive CORS; `OPTIONS` returns `204`.
@@ -24,7 +24,7 @@ GET  /subscriptions/:mandateId   → { serviceable, … }
 Use the thin client instead of calling these by hand:
 
 ```typescript
-import { IsubServiceClient } from '@isub/sdk/client';
+import { IsubServiceClient } from '@isubpay/sdk/client';
 const backend = new IsubServiceClient({ baseUrl, apiKey });
 await backend.use(mandateId, 10_000_000n, 'req-1'); // → { ok, status }
 await backend.status(mandateId);                     // → { serviceable, … } | null

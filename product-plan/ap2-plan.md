@@ -91,7 +91,7 @@ AP2 roles: user · shopping agent · merchant (agent) · **Credential Provider**
 
 ## 3. Scope — what to build
 
-### Module `@isub/sdk/ap2` (`src/ap2.ts`)
+### Module `@isubpay/sdk/ap2` (`src/ap2.ts`)
 - **Types** (compatible shapes; u64s as decimal strings): `Ap2IntentMandate`, `Ap2CartMandate`, `Ap2PaymentMandate`, `Ap2VerifyResult`.
 - `verifyAp2Mandate(m, opts)` — verify the signature/credential. Reuse `agent-auth.ts` (PoP) + `consent.ts`; accept JWS/VC **by shape** (don't hard-fail on spec drift; record the format).
 - `intentToAuthorize(intent, plan)` — map an Intent Mandate → `authorizeMetered` / `authorizeFixed` params, sourcing `expected*` from the plan the user reviewed (terms-binding, not a tautology — see `trusted-display`).
@@ -126,12 +126,12 @@ Deterministic (mock chain, real Ed25519 + agent-auth signatures), like `x402-smo
 ## 6. Acceptance criteria
 - `npm run ap2:smoke` green: AP2 Intent → `authorize` → Cart → settle on-chain, plus the 4 negative gates.
 - An AP2 Intent Mandate round-trips to a real capped on-chain charge; a cart over cap is rejected on-chain.
-- `@isub/sdk/ap2` exported + documented; the homepage/docs badge can move to **AP2-compatible** honestly.
+- `@isubpay/sdk/ap2` exported + documented; the homepage/docs badge can move to **AP2-compatible** honestly.
 - **Zero contract changes** — pure SDK adapter over existing `authorize` / `charge_metered` / x402.
 
 ## 7. Interface sketch
 ```typescript
-import { verifyAp2Mandate, intentToAuthorize, cartToCharge, executeAp2 } from '@isub/sdk/ap2';
+import { verifyAp2Mandate, intentToAuthorize, cartToCharge, executeAp2 } from '@isubpay/sdk/ap2';
 
 // 1. delegated intent (agent-not-present): user-signed, with caps + allowlist + prompt playback
 const v = await verifyAp2Mandate(intentMandate);              // PoP / VC check

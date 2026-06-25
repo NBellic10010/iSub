@@ -178,13 +178,13 @@ export default function Home() {
           <p className="muted" style={{ fontSize: 17, lineHeight: 1.55, maxWidth: 540, margin: '0 auto 20px' }}>
             Authorize once, charge within caps, settle on-chain. No pre-funding, cancel anytime — live on Sui testnet today.
           </p>
-          <CopyCommand cmd="npm i @isub/sdk @mysten/sui" />
+          <CopyCommand cmd="npm i @isubpay/sdk @mysten/sui" />
           <p className="muted" style={{ fontSize: 12.5, marginTop: 16 }}>No pre-funding · capped, revocable · funds never leave your wallet</p>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(264px, 1fr))', gap: 16 }}>
           <PathCard color="#7b5cff" icon={<StoreIcon />} title="Start as a merchant" desc="Publish Fixed or metered plans, embed checkout, and collect on-chain." href="/merchant" cta="Merchant dashboard" />
           <PathCard color="#2b7fff" icon={<WalletIcon />} title="Start as a subscriber" desc="Open an account, fund it, and authorize capped, revocable mandates." href="/app" cta="Open my account" />
-          <PathCard color="#ff6fae" icon={<CodeIcon />} title="Check the SDK" desc="Install @isub/sdk, wire authorize → charge, or run the gateway." href={DOCS_URL} external cta="Read the docs" />
+          <PathCard color="#ff6fae" icon={<CodeIcon />} title="Check the SDK" desc="Install @isubpay/sdk, wire authorize → charge, or run the gateway." href={DOCS_URL} external cta="Read the docs" />
         </div>
       </section>
 

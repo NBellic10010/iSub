@@ -123,7 +123,7 @@ Tributary 概念有两半，命运不同：
 
 ## 4.6 三类接入（老板最关心的"别人怎么用我们"）
 
-三类角色,全部基于**现有 SDK**（`@isub/sdk`,方法名为真实 API）。
+三类角色,全部基于**现有 SDK**（`@isubpay/sdk`,方法名为真实 API）。
 
 ### A. AI agent 怎么接（花费方）
 **模型**：给 agent 一个**专属 iSub Account**,人类只充入"愿意让它花的额度"（= 一道硬上限 = 余额）。agent 在额度内**自主订阅**服务;每个 Mandate 再叠加 `max_per_charge`（单笔）/`total_budget`（单服务总额）/`expiry`（任务期）三道细粒度闸。

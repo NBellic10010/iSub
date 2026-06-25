@@ -31,7 +31,7 @@ An agent runs a budget-bounded session key: a human funds an account and allow-l
 localnet and Sui testnet today. Testnet package: `0xb11a3defcf0edb190edcf17aab87946a78ff514b1c547ff02dc5444b093bce7a`.
 
 **Do I have to self-host a keeper/biller?**
-No — use the [managed gateway](../guides/managed-gateway.md) and the thin `@isub/sdk/client` (api-key + `use` + `verifyWebhook`). Your backend never signs or touches a chain client.
+No — use the [managed gateway](../guides/managed-gateway.md) and the thin `@isubpay/sdk/client` (api-key + `use` + `verifyWebhook`). Your backend never signs or touches a chain client.
 
 **How do I cancel everything right now?**
 `revoke` each mandate (terminal) and `withdrawAll` from the account. Both need only your signature.

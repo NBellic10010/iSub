@@ -3,7 +3,7 @@
 All SDK errors derive from `IsubError`. On-chain reverts surface as `IsubAbortError` (with the Move abort code); gateway HTTP failures as `IsubHttpError`.
 
 ```typescript
-import { IsubError, IsubAbortError, IsubHttpError, isIsubError, abortCodeOf, errorName } from '@isub/sdk';
+import { IsubError, IsubAbortError, IsubHttpError, isIsubError, abortCodeOf, errorName } from '@isubpay/sdk';
 ```
 
 ## Classes
@@ -36,7 +36,7 @@ class IsubHttpError extends IsubError {   // code: 'http'
 ## Decoding aborts
 
 ```typescript
-import { abortCodeOf, errorName, isIsubError } from '@isub/sdk';
+import { abortCodeOf, errorName, isIsubError } from '@isubpay/sdk';
 
 try {
   await isub.chargeMetered(keeper, { accountId, mandateId, amount, seq });

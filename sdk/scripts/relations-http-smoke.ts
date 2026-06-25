@@ -1,5 +1,5 @@
 // Relationship-index HTTP smoke — headless (NO chain, NO localnet). Proves the FULL frontend
-// path: thin `@isub/sdk/client` → IsubGateway HTTP routes → IsubIndex → one-call relationship
+// path: thin `@isubpay/sdk/client` → IsubGateway HTTP routes → IsubIndex → one-call relationship
 // answer, including api-key scoping, public address-keyed reads, and bigint-over-the-wire
 // (every on-chain u64 arrives as a decimal STRING — JSON has no bigint).
 //

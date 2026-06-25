@@ -3,8 +3,8 @@
 A pure, dependency-free pricing layer that converts **raw usage quantities** (tokens, calls, GB) into an exact MIST `amount`, with integer-exact rational prices and explicit rounding. Used by `IsubBiller.recordMeteredUsage`, but usable standalone.
 
 ```typescript
-import { priceUsage, priceUsageMulti, assertValidRateCard, assertRateCardFits } from '@isub/sdk';
-import type { RateCard, Meter, Rounding } from '@isub/sdk';
+import { priceUsage, priceUsageMulti, assertValidRateCard, assertRateCardFits } from '@isubpay/sdk';
+import type { RateCard, Meter, Rounding } from '@isubpay/sdk';
 ```
 
 ## `Meter`
