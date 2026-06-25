@@ -1,7 +1,7 @@
 {
   "name": "@isubpay/sdk",
   "version": "0.0.1",
-  "private": false,
+  "private": true,
   "type": "module",
   "description": "iSub — non-custodial recurring/metered pull-payment primitive on Sui. TS SDK for subscriptions (Fixed), pay-as-you-go (PAYG), x402 mandate scheme, and MCP agent payments.",
   "license": "MIT",
@@ -54,7 +54,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsup && node scripts/make-dist-pkg.mjs",
+    "release": "npm run build && npm publish ./dist --access public",
     "test:unit": "tsx scripts/unit.ts",
     "publish:localnet": "tsx scripts/publish.ts",
     "smoke": "tsx scripts/smoke.ts",
@@ -129,6 +130,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
+    "tsup": "^8.5.1",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   }
