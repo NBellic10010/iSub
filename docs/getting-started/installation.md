@@ -12,7 +12,7 @@
 npm install @isubpay/sdk @mysten/sui
 ```
 
-`@mysten/sui` is a peer dependency — the SDK builds transactions with it and you construct the gRPC client with it.
+`@mysten/sui` installs automatically (it's a regular dependency), but you also import it directly to build the gRPC client (`new SuiGrpcClient(...)`) — so it's good practice to add it to your own `package.json` as shown above.
 
 > In the iSub monorepo the SDK is the workspace package `@isubpay/sdk` (root `package.json` `workspaces: ["sdk", "web", "checkout"]`), which hoists a single copy of `@mysten/sui`. A web app consumes it with `transpilePackages: ['@isubpay/sdk']` in `next.config.ts`.
 
