@@ -2,8 +2,8 @@
 
 ## Requirements
 
-* **Node.js ≥ 22.5** (the SDK uses native `fetch` and, for the gateway/biller stores, the built-in `node:sqlite` — run those scripts with `--experimental-sqlite`).
-* **TypeScript ≥ 5** (the SDK ships as `.ts` and is consumed via `transpilePackages` / `tsx`).
+* **Node.js ≥ 22.5** (the SDK uses native `fetch` and, for the gateway/biller stores, the built-in `node:sqlite` — run those with `--experimental-sqlite`).
+* **TypeScript is optional.** The published package ships compiled **ESM (`.js`) + type declarations (`.d.ts`)**, so it works in plain Node ≥ 22.5 and any bundler (Vite, Next, esbuild) — no build step on your side. *(Inside the iSub monorepo the workspace consumes the TypeScript source directly via `transpilePackages`; see the note below.)*
 * A Sui RPC endpoint. The SDK talks **gRPC** via `@mysten/sui`.
 
 ## Install

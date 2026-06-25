@@ -31,7 +31,7 @@ idempotency + refunds), `dunning-smoke.ts` (state machine + reconciliation),
 
 ## Run the e2e on localnet
 
-Prereqs: `sui` CLI (tested on 1.71), Node ≥ 20.
+Prereqs: `sui` CLI (tested on 1.71), Node ≥ 22.5 (matches the package's `engines`).
 
 ```bash
 # 1. start an ephemeral localnet with a faucet (leave running)
