@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   const store = memBillerStore();
   const biller = new IsubBiller(chain, SIG, store);
 
-  // ── Act A — seq idempotency: a replayed (stale-seq) batch can NEVER double-charge ──
+  // ── Act A — seq idempotency (SINGLE biller): a replayed (stale-seq) batch can NEVER double-charge ──
   await biller.recordUsage({ mandateId: MID, amount: 10n, usageId: 'u1' });
   await biller.flush(MID);
   check(chain.m.spentTotal === 10n && chain.m.chargeSeq === 1n, 'baseline charge landed (spent 10, seq 1)');
@@ -80,7 +80,7 @@ async function main(): Promise<void> {
     'replay the landed batch at its OLD seq → EBadChargeSeq');
   check(chain.m.spentTotal === 10n, 'replay changed nothing on-chain (no double-charge)');
 
-  // ── Act B — crash / lost-ack: charge landed but the keeper never saw the ack ──
+  // ── Act B — crash / lost-ack (SINGLE biller): charge landed but the keeper never saw the ack ──
   await biller.recordUsage({ mandateId: MID, amount: 10n, usageId: 'u2' });
   chain.loseAckOnce = true;
   await biller.flush(MID); // lands (spent 20, seq 2) but throws transient → next attempt's recoverOrphan repairs
@@ -100,9 +100,22 @@ async function main(): Promise<void> {
   const drift = await reconcile(chain as unknown as Parameters<typeof reconcile>[0], store as unknown as Parameters<typeof reconcile>[1]);
   const row = drift.rows.find((r) => r.mandateId === MID)!;
   check(drift.ok === false && row.countDrift === 1 && row.unattributedAmount === 5n,
-    'reconcile flags the drift — on-chain spend the journal can\'t itemize (detected, not prevented)');
+    'reconcile flags COUNT drift here, AT RECONCILE TIME (see the boundaries below for what it does NOT durably catch)');
 
-  console.log(`\n✅ idempotency & tamper-boundary: ${checks} assertions — seq blocks replay, recoverOrphan survives crash, cap bounds inflation, reconcile detects the rest`);
+  // ── KNOWN BOUNDARIES (audit-disclosed; PINNED so they are never silently overclaimed) ──
+  // The no-double-charge guarantees above hold for a SINGLE biller only: recoverOrphan's "last submit
+  // per seq wins" relies on the single-biller invariant. The store lock meant to enforce it is NOT a real
+  // mutex — memBillerStore has none, and sqlBillerStore.acquireLock is a non-atomic TOCTOU — so two
+  // billers over the same mandate CAN double/drop-charge. This smoke runs ONE biller; it pins the lock
+  // absence so the single-biller scope is explicit, not assumed.
+  check(memBillerStore().acquireLock === undefined, 'memBillerStore has NO lock → the guarantees above are SINGLE-biller only (multi-biller needs a real mutex)');
+  // reconcile's drift signal is also NOT durable/complete: (1) `ok` is gated on countDrift only, so an
+  // amount-only inflation (same seq count, wrong amount) leaves ok=true even though unattributedAmount!=0;
+  // (2) a running keeper auto-writes an `observed` entry on the chain-count jump, which reconcile
+  // reclassifies as "expected external" — so the countDrift caught above flips back to ok=true on the next
+  // poll. Detection is point-in-time. (Fixing both is a change to reconcile.ok + the lock — tracked OUT of this smoke.)
+
+  console.log(`\n✅ idempotency & tamper-boundary: ${checks} assertions — SINGLE-biller seq idempotency (replay blocked, crash recovered), cap bounds inflation, reconcile flags count-drift AT RECONCILE TIME. Multi-biller safety + durable/amount-level drift are DISCLOSED boundaries (pinned above), not guarantees.`);
 }
 
 main().catch((e) => { console.error('\n❌ idempotency smoke failed:', e instanceof Error ? e.message : e); process.exit(1); });

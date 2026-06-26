@@ -92,7 +92,32 @@ async function main(): Promise<void> {
   check(forge.status === 403, 'attacker-signed cert (not the subscriber) → 403');
 
   server.close();
-  console.log(`\n✅ agent-auth HTTP red-team passed — ${checks} assertions (gateway HTTP door: legit 200 · bearer 403 · forged-cert 403).`);
+
+  // ===== SECURE BY DEFAULT — gateway policy WITHOUT agentAuth + tenant WITHOUT agentAuthMode ⇒ enforce =====
+  // The gateway above set agentAuth:'enforce' explicitly. This pins that OMITTING it everywhere (neither
+  // gateway policy nor tenant routing sets a mode) still resolves to 'enforce', so a forgetful operator's
+  // managed gateway does NOT ship the bearer-mandateId hole open. Regression guard for secure-by-default.
+  console.log('\n• SECURE-BY-DEFAULT: gateway with NO agentAuth configured anywhere');
+  const db2 = openDb(':memory:');
+  registerMerchant(db2, { id: 'acme', name: 'Acme', apiKey: API_KEY, payoutAddress: PAYOUT });
+  const gw2 = new IsubGateway({
+    chain: new MockChain(),
+    keeperSigner,
+    db: db2,
+    policy: { windowMs: 999_999_000 }, // NO agentAuth set
+    routing: (mid) => (mid === 'acme' ? { payoutAddress: PAYOUT } : null), // NO agentAuthMode set
+  });
+  const srv2 = gw2.listen(0);
+  const port2 = await new Promise<number>((r) => srv2.on('listening', () => r((srv2.address() as AddressInfo).port)));
+  const bearer2 = await fetch(`http://127.0.0.1:${port2}/usage`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-isub-api-key': API_KEY, 'x-isub-mandate': 'M1' },
+    body: JSON.stringify({ amount: AMOUNT.toString(), usageId: 'bearer-default-1' }),
+  });
+  check(bearer2.status === 403, 'gateway with NO agentAuth anywhere: bearer → 403 (secure by default, not off)');
+  srv2.close();
+
+  console.log(`\n✅ agent-auth HTTP red-team passed — ${checks} assertions (gateway HTTP door: legit 200 · bearer 403 · forged-cert 403 · secure-by-default 403).`);
   process.exit(0); // the per-tenant service window loop keeps the event loop alive
 }
 

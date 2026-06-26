@@ -32,9 +32,10 @@ export interface MerchantRouting {
   /** Optional price list — enables raw-quantity metered reporting (`/usage-metered`) for this tenant. */
   rateCard?: RateCard;
   /**
-   * Per-tenant proof-of-possession policy ('off' | 'warn' | 'enforce'), overriding the gateway-wide
-   * `policy.agentAuth`. Set 'enforce' for an agent-facing tenant whose callers must present a PoP;
-   * leave unset for a merchant self-metering its own users (the api-key already authenticates them).
+   * Per-tenant proof-of-possession policy ('off' | 'warn' | 'enforce'). The agent-facing HTTP door is
+   * SECURE BY DEFAULT: when neither this nor the gateway-wide `policy.agentAuth` is set, it resolves to
+   * 'enforce' — a bearer mandateId with no PoP is rejected 403. Set 'off' EXPLICITLY for a merchant
+   * self-metering its own users (the api-key already authenticates them).
    * Lets ONE gateway serve human-off and agent-enforce tenants side by side, on one service each.
    */
   agentAuthMode?: 'off' | 'warn' | 'enforce';
@@ -92,7 +93,8 @@ export class IsubGateway {
       this.o.keeperSigner,
       r.payoutAddress,
       sqlBillerStore(this.o.db, merchantId),
-      r.agentAuthMode ? { ...this.o.policy, agentAuth: r.agentAuthMode } : this.o.policy,
+      // Secure by default: an agent-facing tenant ENFORCES PoP unless tenant or operator opts out.
+      { ...this.o.policy, agentAuth: r.agentAuthMode ?? this.o.policy.agentAuth ?? 'enforce' },
       dispatcher ? (e: BillerEvent) => void dispatcher.enqueue(eventToWebhook(e)) : undefined,
       r.rateCard,
     );

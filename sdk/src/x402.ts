@@ -297,6 +297,7 @@ interface SimulatedTx {
 interface ExecutedTx {
   digest: string;
   status: { success: boolean };
+  balanceChanges?: { coinType: string; address: string; amount: string }[];
 }
 
 /**
@@ -326,30 +327,56 @@ export class ExactFacilitator {
     }
     const t = sim.$kind === 'Transaction' ? sim.Transaction : sim.FailedTransaction;
     if (sim.$kind !== 'Transaction' || !t || !t.status.success) return { isValid: false, invalidReason: 'simulation_failed' };
-    const want = BigInt(requirements.maxAmountRequired);
-    const asset = normalizeStructTag(requirements.asset);
-    const payTo = normalizeSuiAddress(requirements.payTo);
-    // The merchant's NET credit of the requested asset must equal the requested amount, exactly.
-    const credit = (t.balanceChanges ?? []).find((b) => normalizeSuiAddress(b.address) === payTo && normalizeStructTag(b.coinType) === asset);
+    const { credit, want } = this.merchantCredit(t.balanceChanges, requirements);
     if (!credit) return { isValid: false, invalidReason: 'no_payment_to_merchant' };
     if (BigInt(credit.amount) !== want) return { isValid: false, invalidReason: 'amount_mismatch' };
     return { isValid: true, payer: t.transaction?.sender };
   }
 
+  /** The merchant's NET balance change of the requested asset + the required amount. The transfer pays
+   *  the merchant EXACTLY iff `credit` exists and `BigInt(credit.amount) === want`. Shared by verify + settle. */
+  private merchantCredit(
+    balanceChanges: { coinType: string; address: string; amount: string }[] | undefined,
+    requirements: PaymentRequirements,
+  ): { credit?: { coinType: string; address: string; amount: string }; want: bigint } {
+    const want = BigInt(requirements.maxAmountRequired);
+    const asset = normalizeStructTag(requirements.asset);
+    const payTo = normalizeSuiAddress(requirements.payTo);
+    const credit = (balanceChanges ?? []).find((b) => normalizeSuiAddress(b.address) === payTo && normalizeStructTag(b.coinType) === asset);
+    return { credit, want };
+  }
+
   /** Authoritative: broadcast the buyer's signed transfer. FINAL — returns the on-chain digest.
-   *  Re-submitting the same signed bytes is idempotent on Sui (the digest is fixed by the bytes). */
+   *  Re-submitting the same signed bytes is idempotent on Sui (the digest is fixed by the bytes).
+   *
+   *  settle is SELF-AUTHORITATIVE: x402 permits `/verify` and `/settle` as independent endpoints, so a
+   *  settle-only caller must not be able to broadcast a tx that doesn't pay the merchant exactly. So we
+   *  (1) re-run the exactness check (simulate) BEFORE executing — a rejection here never broadcasts — and
+   *  (2) re-confirm against the LANDED `balanceChanges` after executing, so the `final/exact` guarantee
+   *  reflects on-chain reality, not merely `status.success` (a wrong-amount transfer still "succeeds"). */
   async settle(payload: ExactPaymentPayload, requirements: PaymentRequirements): Promise<SettleResponse> {
     if (payload.scheme !== EXACT_SCHEME) return { success: false, errorReason: 'scheme_mismatch' };
     const ex = payload.payload;
     if (!ex?.transaction || !ex.signature) return { success: false, errorReason: 'missing_tx_or_signature' };
+
+    // (1) Pre-broadcast gate — simulate + assert exact payment. Reject here = never executed.
+    const gate = await this.verify(payload, requirements);
+    if (!gate.isValid) return { success: false, errorReason: gate.invalidReason };
+
     let res: Awaited<ReturnType<ExactChainClient['executeTransaction']>>;
     try {
-      res = await this.client.executeTransaction({ transaction: fromBase64(ex.transaction), signatures: [ex.signature], include: { effects: true } });
+      res = await this.client.executeTransaction({ transaction: fromBase64(ex.transaction), signatures: [ex.signature], include: { effects: true, balanceChanges: true } });
     } catch (e) {
       return { success: false, errorReason: 'execution_error: ' + (e instanceof Error ? e.message : String(e)) };
     }
     const t = res.$kind === 'Transaction' ? res.Transaction : res.FailedTransaction;
     if (res.$kind !== 'Transaction' || !t || !t.status.success) return { success: false, errorReason: 'execution_failed' };
+
+    // (2) Post-broadcast confirmation — the LANDED transfer must credit the merchant exactly, or we do
+    //     NOT claim an exact settlement (the tx is on-chain; surface the digest with the failure).
+    const { credit, want } = this.merchantCredit(t.balanceChanges, requirements);
+    if (!credit || BigInt(credit.amount) !== want) return { success: false, errorReason: 'settled_but_not_exact', txHash: t.digest };
+
     return {
       success: true,
       settlement: 'final',

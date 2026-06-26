@@ -108,6 +108,9 @@ async function main(): Promise<void> {
     name: 'isub-demo',
     walletTools,
     service: svc,
+    // This smoke isolates the MCP protocol + billing mechanics; PoP enforcement (the SECURE DEFAULT
+    // for metered tools) is covered by per-route-auth-smoke §5 + agent-auth-redteam. Opt out explicitly.
+    meteredAuthMode: 'off',
     metered: [
       {
         name: 'query_price_feed',
@@ -146,7 +149,7 @@ async function main(): Promise<void> {
   const sub = await call('subscribe', { service: 'price-feed', budget: '200' });
   check(sub.data.ok === true && sub.data.mandateId === 'M1', 'subscribe → ok, returns the mandate id (the payment credential)');
 
-  // ===== C: metered face — pay-per-call, agent never signs =====
+  // ===== C: metered face — pay-per-call (billing mechanics; PoP opted out here, enforced by default elsewhere) =====
   console.log('\n• C: metered face (query×6, each meters a charge)');
   let served = 0;
   for (let i = 0; i < 6; i++) {

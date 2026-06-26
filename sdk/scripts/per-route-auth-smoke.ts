@@ -121,7 +121,22 @@ async function main(): Promise<void> {
   check(!okCall.isError && okCall.data.result?.ok === true, 'MCP metered: valid PoP → served (route enforced, not from tool args)');
   await mcl.close(); await mcp.close();
 
-  console.log(`\n✅ per-route agent-auth verified — ${checks} assertions. Human PAYG safe; agent/x402 + MCP enforced; one service/biller; route (not client) sets the mode.`);
+  // ===== 6: SECURE BY DEFAULT — OMITTING meteredAuthMode resolves to 'enforce', NOT 'off' =====
+  // §5 set meteredAuthMode:'enforce' explicitly; this pins that LEAVING IT UNSET still enforces, so a
+  // forgetful operator can't ship the bearer-mandateId hole. Regression guard for the secure-by-default fix.
+  console.log('\n• 6: MCP metered route — meteredAuthMode OMITTED ⇒ enforce by default');
+  const chain6 = new MockChain(); chain6.add(mk('M_def', subKp.toSuiAddress()));
+  const svc6 = new IsubService(chain6, SIG, SVC, memBillerStore(), { windowMs: 3_600_000, agentAuth: 'off' }); // service default off…
+  const mcp6 = createIsubMcpServer({ name: 'isub-default', service: svc6, metered: [{ name: 'query', description: 'demo', price: 1000n, run: () => ({ ok: true }) }] }); // …meteredAuthMode OMITTED
+  const [ct6, st6] = InMemoryTransport.createLinkedPair();
+  const mcl6 = new Client({ name: 'pr-def', version: '0.0.1' }, { capabilities: {} });
+  await Promise.all([mcp6.connect(st6), mcl6.connect(ct6)]);
+  const r6 = (await mcl6.callTool({ name: 'query', arguments: { mandateId: 'M_def', usageId: 'd1' } })) as { content: { text: string }[]; isError?: boolean };
+  const d6 = JSON.parse(r6.content[0]?.text ?? '{}');
+  check(!!r6.isError && d6.status === 403, 'MCP metered, meteredAuthMode OMITTED: bearer (no PoP) → 403 (secure by default, not off)');
+  await mcl6.close(); await mcp6.close();
+
+  console.log(`\n✅ per-route agent-auth verified — ${checks} assertions. Human PAYG safe; agent/x402 + MCP enforced; secure-by-default (omitted ⇒ enforce); one service/biller; route (not client) sets the mode.`);
 }
 
 main().catch((e) => { console.error('\n❌ per-route-auth smoke failed:', e instanceof Error ? e.message : e); process.exit(1); });

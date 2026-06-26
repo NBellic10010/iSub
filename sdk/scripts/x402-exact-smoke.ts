@@ -32,6 +32,9 @@ const check = (c: boolean, label: string): void => {
 function mockClient(opts: {
   simSuccess?: boolean;
   credits?: { coinType: string; address: string; amount: string }[];
+  /** What the EXECUTED tx actually credits (defaults to `credits`) — lets a test make settle's LANDED
+   *  reality differ from simulation, to exercise the post-broadcast confirmation. */
+  execCredits?: { coinType: string; address: string; amount: string }[];
   sender?: string;
   execSuccess?: boolean;
   digest?: string;
@@ -44,7 +47,7 @@ function mockClient(opts: {
         : { $kind: 'Transaction' as const, Transaction: tx };
     },
     async executeTransaction() {
-      const tx = { digest: opts.digest ?? '0xDIGEST', status: { success: opts.execSuccess ?? true } };
+      const tx = { digest: opts.digest ?? '0xDIGEST', status: { success: opts.execSuccess ?? true }, balanceChanges: opts.execCredits ?? opts.credits ?? [] };
       return opts.execSuccess === false
         ? { $kind: 'FailedTransaction' as const, FailedTransaction: tx }
         : { $kind: 'Transaction' as const, Transaction: tx };
@@ -97,9 +100,18 @@ async function main(): Promise<void> {
   check((await f.verify(pay({ scheme: 'mandate' }), req)).invalidReason === 'scheme_mismatch', 'rejects a non-exact scheme');
   check((await f.verify(pay({ network: 'sui-mainnet' }), req)).invalidReason === 'network_mismatch', 'rejects a network mismatch');
 
-  // SETTLE surfaces an on-chain execution failure
-  const execFail = new ExactFacilitator(mockClient({ execSuccess: false }), NET);
+  // SETTLE surfaces an on-chain execution failure (credits correct so the pre-broadcast gate passes first)
+  const execFail = new ExactFacilitator(mockClient({ credits: [{ coinType: ASSET, address: MERCHANT, amount: '1000000' }], execSuccess: false }), NET);
   check(!(await execFail.settle(pay(), req)).success, 'settle surfaces an on-chain execution failure');
+
+  // SETTLE IS SELF-AUTHORITATIVE — a settle-only call (NO prior verify; x402 allows /verify and /settle as
+  // independent endpoints) must NOT broadcast or claim "exact" for an underpaying/misdirected tx.
+  check(!(await under.settle(pay(), req)).success, 'settle (no prior verify): underpaying tx → rejected BEFORE broadcast (never claimed exact)');
+  check(!(await wrongTo.settle(pay(), req)).success, 'settle (no prior verify): payment to wrong address → rejected before broadcast');
+  // DEFENSE IN DEPTH — simulation shows exact, but the LANDED transfer underpays → not claimed as exact.
+  const landedWrong = new ExactFacilitator(mockClient({ credits: [{ coinType: ASSET, address: MERCHANT, amount: '1000000' }], execCredits: [{ coinType: ASSET, address: MERCHANT, amount: '1' }], digest: '0xBAD' }), NET);
+  const dd = await landedWrong.settle(pay(), req);
+  check(!dd.success && dd.errorReason === 'settled_but_not_exact' && dd.txHash === '0xBAD', 'settle confirms LANDED balanceChanges — underpaid execution → settled_but_not_exact (digest surfaced)');
 
   console.log(`\nx402 exact: ${checks} checks passed ✓`);
 }
