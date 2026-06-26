@@ -63,6 +63,7 @@
     "keeper:smoke": "tsx scripts/keeper-smoke.ts",
     "payg:smoke": "tsx scripts/payg-smoke.ts",
     "dunning:smoke": "tsx scripts/dunning-smoke.ts",
+    "idempotency:smoke": "tsx scripts/idempotency-smoke.ts",
     "agent:smoke": "tsx scripts/agent-smoke.ts",
     "pricing:smoke": "tsx scripts/pricing-smoke.ts",
     "rules:smoke": "tsx scripts/rules-smoke.ts",
