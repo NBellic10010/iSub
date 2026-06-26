@@ -49,7 +49,7 @@ The package is split so you only pull in what you use:
 | `@isubpay/sdk/relations` | `IsubIndex` (off-chain relationship index) |
 | `@isubpay/sdk/client` | `IsubServiceClient`, `verifyWebhook` (thin client → gateway) |
 | `@isubpay/sdk/mcp` | `createIsubMcpServer` (Model Context Protocol server) |
-| `@isubpay/sdk/x402` | x402 (seller · buyer · facilitator), the `mandate` scheme — agent payments |
+| `@isubpay/sdk/x402` | x402 (seller · buyer · facilitator) — the standard **`exact`** scheme (interop, on-chain `final` digest) **and** a **`mandate`** pull-extension (recurring/metered/capped) for agent payments |
 | `@isubpay/sdk/sql-store` · `/db` · `/store-file` | persistence backends |
 | `@isubpay/sdk/webhook` · `/service` | webhook signing/verifying, single-tenant service |
 
