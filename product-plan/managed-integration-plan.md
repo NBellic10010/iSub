@@ -12,7 +12,8 @@ iSub 替商家扣款,但**碰不到钱**:Fixed charge permissionless、PAYG 把 
 ## 3. 商家接入面(瘦 client,任意语言,就 4 件事)
 1. **建套餐**(连钱包签 1 次;PAYG 把 `keeper` 设成 iSub 公开的 keeper 地址)—— 走 dashboard 或一行 SDK。
 2. **前端嵌 `<IsubSubscribe>`**(客户 authorize)。
-3. **(PAYG)上报用量**:服务每次被调用 → `client.use(mandateId, amount, usageId)`(底层 POST 到 iSub 托管网关)。
+3. **(PAYG)上报用量**:服务每次被调用 → `client.use(mandateId, amount, usageId)`(预定价)或 `client.useMetered(mandateId, [{meterKey, qty}], usageId)`(网关按租户 RateCard 定价),底层 POST 到 iSub 托管网关。
+   - **鉴权姿态(secure-by-default)**:网关上报门默认 `agentAuth:'enforce'`(裸 mandateId 无证明 → 403,因为 mandateId 是公开链上对象)。**可信商家后端自计量自己的用户** → 把该租户 `routing.agentAuthMode:'off'`(api-key 即信任边界,`use()` 无需 proof);**中转不可信 agent** → 保持 `'enforce'` 并传 per-call PoP(`use(..., proof)`)。四种模式由 `npm run managed-thinclient:smoke` 端到端钉死。
 4. **收 webhook**:`verifyWebhook(签名)` + 按事件开通 / 降级 / 停服。
 
 → **没有 IsubService、没有 biller、没有数据库、没有扣款签名 —— 全是 iSub 跑。**

@@ -15,22 +15,40 @@ GET /health → { "ok": true }
 
 ## Metered billing (api-key)
 
+The mandate id rides in the `x-isub-mandate` header; the body carries the amount/items + `usageId`
+(and, on an `'enforce'` tenant, the agent proof — see **Auth** below).
+
 ```
-POST /usage           { mandateId, amount, usageId }   → 200 served · 402 gated · 403 bad key
-POST /usage-metered   { mandateId, meterKey, qty, usageId }   (priced by the tenant RateCard)
+POST /usage           x-isub-mandate: <id>   body { amount, usageId }              → 200 served · 402 gated · 403 no/invalid proof
+POST /usage-metered   x-isub-mandate: <id>   body { items: [{meterKey, qty}], usageId }   (priced by the tenant RateCard)
 GET  /subscriptions/:mandateId   → { serviceable, … }
 ```
+
+Status codes: **401** missing/invalid api-key · **402** out of budget/rate (stop serving) · **403** bearer mandate id with no/invalid agent proof on an `'enforce'` tenant.
 
 Use the thin client instead of calling these by hand:
 
 ```typescript
 import { IsubServiceClient } from '@isubpay/sdk/client';
 const backend = new IsubServiceClient({ baseUrl, apiKey });
-await backend.use(mandateId, 10_000_000n, 'req-1'); // → { ok, status }
-await backend.status(mandateId);                     // → { serviceable, … } | null
+// The proofless calls below assume an agentAuthMode:'off' tenant; on an 'enforce' tenant pass a
+// 4th `proof` arg (agent PoP). Bare calls on an 'enforce' tenant return 403 — see Auth below.
+await backend.use(mandateId, 10_000_000n, 'req-1');                      // pre-priced amount → { ok, status }
+await backend.useMetered(mandateId, [{ meterKey: 'tokens.in', qty: 1200n }], 'req-1'); // raw qty (tenant RateCard)
+await backend.status(mandateId);                                         // → { serviceable, … } | null
 ```
 
-`use()` records usage idempotently (by `usageId`); the gateway settles on-chain per its policy (the keeper signs). When budget/rate is exhausted it returns **402** — stop serving, no chain call in the hot path.
+`use()`/`useMetered()` record usage idempotently (by `usageId`); the gateway settles on-chain per its policy (the keeper signs). When budget/rate is exhausted it returns **402** — stop serving, no chain call in the hot path.
+
+### Auth (secure by default)
+
+These doors resolve to `agentAuth:'enforce'` unless the tenant sets `routing.agentAuthMode:'off'` — a bare mandate id (public on-chain object) with no proof is **403**. A trusted backend self-metering its own users sets the tenant to `'off'` (the api-key is the trust boundary); to relay an **untrusted agent**'s calls, keep `'enforce'` and pass a per-call proof:
+
+```typescript
+await backend.use(mandateId, amount, usageId, proof); // proof: { sig, notAfter, cert } from signCall + issueAgentCert
+```
+
+On the wire the proof is the flat fields `agentSig` / `agentSigNotAfter` / `agentCert` in the body. See the [managed gateway guide](../guides/managed-gateway.md#auth-posture-secure-by-default).
 
 ## Relationship index — write-time ingest
 

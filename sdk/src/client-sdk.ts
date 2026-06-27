@@ -1,10 +1,21 @@
 // `@isubpay/sdk/client` — the THIN client a merchant imports to use the MANAGED gateway.
 //
-// This is the whole merchant-side surface: an api-key, three calls, and a webhook
+// This is the whole merchant-side surface: an api-key, the report/read calls, and a webhook
 // verifier. NO heavy deps (no IsubClient / keeper / biller / DB / chain) — just HTTP
 // + an HMAC check. A non-Node backend can skip this package entirely and speak the
 // same HTTP + signature scheme directly; this is the convenience wrapper for Node.
+//
+// AUTH POSTURE — the gateway's metered-report doors (`/usage`, `/usage-metered`) are SECURE BY
+// DEFAULT (the tenant resolves to agentAuth:'enforce' unless told otherwise). Two supported shapes:
+//   • Trusted merchant backend self-metering its OWN users — this client holds the api-key on YOUR
+//     server, so the api-key IS the trust boundary. Set the tenant's `routing.agentAuthMode:'off'`
+//     and call `use`/`useMetered` with no `proof`. (This is what `managed-e2e` exercises.)
+//   • Untrusted agent reporting through a shared api-key — keep the tenant 'enforce' and pass a
+//     per-call `proof` (an agent proof-of-possession; see `@isubpay/sdk` `signCall`/`issueAgentCert`).
+//   Omitting BOTH on an 'enforce' tenant → 403 (the bearer-mandateId door is closed). See
+//   docs/guides/managed-gateway.md.
 import { verifyWebhook } from './webhook';
+import type { CallProof } from './agent-auth';
 
 export { verifyWebhook };
 export type { WebhookEvent, VerifyOptions } from './webhook';
@@ -38,6 +49,22 @@ export interface AccountRowJson {
   accountId: string; owner: string; updatedAt: number;
 }
 
+/**
+ * Serialize a `CallProof` into the flat HTTP body fields the gateway reconstructs via
+ * `proofFromFields` (`agentSig` / `agentSigNotAfter` / `agentCert`). bigints → decimal strings
+ * (JSON has no bigint). Returns `{}` for no proof, so an unsigned body is unchanged.
+ */
+function proofFields(proof?: CallProof): Record<string, unknown> {
+  if (!proof) return {};
+  return {
+    agentSig: proof.sig,
+    agentSigNotAfter: proof.notAfter.toString(),
+    ...(proof.cert
+      ? { agentCert: { agent: proof.cert.agent, notAfter: proof.cert.notAfter.toString(), ver: proof.cert.ver, sig: proof.cert.sig } }
+      : {}),
+  };
+}
+
 export class IsubServiceClient {
   private readonly baseUrl: string;
   private readonly apiKey: string;
@@ -50,15 +77,40 @@ export class IsubServiceClient {
   }
 
   /**
-   * Report this call's metered usage against the agent's mandate (the payment credential).
-   * Call it in your own request handler; gate delivery on `ok`/`status`. Idempotent by
-   * `usageId` — safe to retry. The gateway meters, aggregates, and settles on-chain.
+   * Report this call's metered usage against the agent's mandate (the payment credential), with the
+   * `amount` you priced. Call it in your own request handler; gate delivery on `ok`/`status`.
+   * Idempotent by `usageId` — safe to retry. The gateway meters, aggregates, and settles on-chain.
+   *
+   * `proof` is OPTIONAL: omit it when this tenant is `agentAuthMode:'off'` (trusted backend
+   * self-metering); pass an agent PoP when the tenant is 'enforce' (untrusted agent via shared
+   * api-key). On an 'enforce' tenant a call with no proof is rejected 403. See the header note.
    */
-  async use(mandateId: string, amount: bigint, usageId: string): Promise<UseResponse> {
+  async use(mandateId: string, amount: bigint, usageId: string, proof?: CallProof): Promise<UseResponse> {
     const res = await this.fetchImpl(`${this.baseUrl}/usage`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-isub-api-key': this.apiKey, 'x-isub-mandate': mandateId },
-      body: JSON.stringify({ amount: amount.toString(), usageId }),
+      body: JSON.stringify({ amount: amount.toString(), usageId, ...proofFields(proof) }),
+    });
+    const data = (await res.json().catch(() => ({}))) as Partial<UseResponse>;
+    return { ok: res.ok, status: res.status, reason: data.reason };
+  }
+
+  /**
+   * Report RAW usage QUANTITIES; the gateway prices them with this tenant's on-chain RateCard and
+   * settles the frozen amount. Mirrors `use` but for metered billing — the gateway must be
+   * configured with `routing.rateCard` for this tenant (else the report errors). Same idempotency
+   * (`usageId`) + optional-`proof` auth contract as `use`.
+   */
+  async useMetered(
+    mandateId: string,
+    items: ReadonlyArray<{ meterKey: string; qty: bigint }>,
+    usageId: string,
+    proof?: CallProof,
+  ): Promise<UseResponse> {
+    const res = await this.fetchImpl(`${this.baseUrl}/usage-metered`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-isub-api-key': this.apiKey, 'x-isub-mandate': mandateId },
+      body: JSON.stringify({ items: items.map((i) => ({ meterKey: i.meterKey, qty: i.qty.toString() })), usageId, ...proofFields(proof) }),
     });
     const data = (await res.json().catch(() => ({}))) as Partial<UseResponse>;
     return { ok: res.ok, status: res.status, reason: data.reason };
