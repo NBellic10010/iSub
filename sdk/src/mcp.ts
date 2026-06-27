@@ -60,8 +60,10 @@ export interface IsubMcpOptions {
   service?: MeteredService;
   /**
    * Per-ROUTE proof-of-possession policy for the metered tools ('off' | 'warn' | 'enforce'). MCP
-   * metered tools are agent-facing, so set 'enforce' to require an agent PoP on every call; omit to
-   * inherit the service default (`policy.agentAuth`). Set by the operator — never from tool args.
+   * metered tools are agent-facing, so this is SECURE BY DEFAULT: when omitted it resolves to
+   * 'enforce' — every call must carry a valid agent PoP or it is rejected 403, closing the
+   * bearer-mandateId hole. Set 'off' ONLY for a merchant self-metering its own already-authenticated
+   * users (never to inherit a permissive service default). Set by the operator — never from tool args.
    */
   meteredAuthMode?: 'off' | 'warn' | 'enforce';
   name?: string;
@@ -154,7 +156,8 @@ export function createIsubMcpServer(opts: IsubMcpOptions): Server {
     const m = metered.find((t) => t.name === name);
     if (m) {
       try {
-        return await runMetered(m, service!, args, opts.meteredAuthMode);
+        // Secure by default: agent-facing metered tools ENFORCE PoP unless the operator explicitly opts out.
+        return await runMetered(m, service!, args, opts.meteredAuthMode ?? 'enforce');
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
       }

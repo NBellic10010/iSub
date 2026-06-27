@@ -295,9 +295,14 @@ export class IsubService {
 
   /**
    * Thin HTTP front: `POST /use` with `x-isub-mandate: <id>` header + body `{ amount, usageId }`.
+   * SECURE BY DEFAULT: this is an agent-facing network door, so it ENFORCES the agent PoP (a bearer
+   * mandateId with no proof → 403) unless the operator passes `{ authMode: 'off' }` for a merchant
+   * self-metering its own already-authenticated users. (The in-process `use()` primitive keeps its
+   * permissive default so a trusted route picks its own mode; only the network DOOR fails closed.)
    * Production services would fold `use()` into their own business endpoint instead.
    */
-  listen(port: number): Server {
+  listen(port: number, opts: { authMode?: 'off' | 'warn' | 'enforce' } = {}): Server {
+    const authMode = opts.authMode ?? 'enforce';
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       if (req.method !== 'POST' || !(req.url ?? '').startsWith('/use')) {
         res.statusCode = 404;
@@ -313,7 +318,7 @@ export class IsubService {
             return res.end(JSON.stringify({ ok: false, reason: 'missing x-isub-mandate header' }));
           }
           const parsed = JSON.parse(body || '{}') as { amount: string; usageId: string; agentSig?: unknown; agentSigNotAfter?: unknown; agentCert?: unknown };
-          const r = await this.use(mandateId, BigInt(parsed.amount), String(parsed.usageId), proofFromFields(parsed));
+          const r = await this.use(mandateId, BigInt(parsed.amount), String(parsed.usageId), proofFromFields(parsed), authMode);
           res.statusCode = r.status;
           res.end(JSON.stringify(r));
         } catch (e) {
