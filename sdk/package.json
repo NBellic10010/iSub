@@ -93,6 +93,7 @@
     "compliance:smoke": "tsx scripts/compliance-smoke.ts",
     "discovery:smoke": "tsx scripts/discovery-smoke.ts",
     "agent-auth-http:redteam": "NODE_OPTIONS=--experimental-sqlite tsx scripts/agent-auth-http-redteam.ts",
+    "managed-thinclient:smoke": "NODE_OPTIONS=--experimental-sqlite tsx scripts/managed-thinclient-smoke.ts",
     "x402:smoke": "tsx scripts/x402-smoke.ts",
     "x402-exact:smoke": "tsx scripts/x402-exact-smoke.ts",
     "x402-exact-testnet:smoke": "ISUB_NETWORK=testnet tsx scripts/x402-exact-testnet-smoke.ts",

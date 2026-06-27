@@ -4,6 +4,13 @@
 // in the merchant's payout address. The merchant section touches NO IsubService / biller /
 // DB / chain / charge-signing — that's the whole point.
 //
+// AUTH: this tenant is a TRUSTED merchant backend self-metering its OWN users, so it declares
+// `routing.agentAuthMode:'off'` — the api-key is the trust boundary. The gateway's metered doors
+// are secure-by-default 'enforce' (closing the bearer-mandateId hole for agent-presented routes);
+// a self-metering merchant opts that tenant out. The agent-PoP enforce path (untrusted agent
+// reporting through a shared api-key, with a per-call proof) is covered by agent-auth-http-redteam.ts
+// and managed-thinclient-smoke.ts.
+//
 // Run: `npm run managed-e2e:testnet` (real chain) or `npm run managed-e2e` (localnet).
 import { createServer, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -76,7 +83,10 @@ async function main(): Promise<void> {
     keeperSigner,
     db,
     policy: { windowMs: WINDOW_MS },
-    routing: (mid) => (mid === 'acme' ? { payoutAddress: merchant.address, webhook: { url: `http://127.0.0.1:${recvPort}`, secret: WH_SECRET } } : null),
+    // Trusted merchant backend self-metering its own users via the thin client → opt this tenant
+    // out of agent-PoP (the api-key authenticates it). Without this the secure-by-default 'enforce'
+    // would 403 the proofless thin-client `use()`. See the header note + managed-thinclient-smoke.ts.
+    routing: (mid) => (mid === 'acme' ? { payoutAddress: merchant.address, agentAuthMode: 'off', webhook: { url: `http://127.0.0.1:${recvPort}`, secret: WH_SECRET } } : null),
   });
   const gwPort = await new Promise<number>((r) => {
     const s = gateway.listen(0);

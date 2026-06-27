@@ -24,7 +24,9 @@ const gateway = new IsubGateway({
   db,
   policy: { windowMs: 3_600_000 }, // settle cadence / batching policy
   routing: (merchantId) => merchantId === 'acme'
-    ? { payoutAddress: merchant.address, webhook: { url: 'https://acme.example/wh', secret: 'whsec_…' } }
+    // agentAuthMode:'off' — trusted backend self-metering its own users (api-key is the trust
+    // boundary). OMIT it and the tenant is secure-by-default 'enforce' (see "Auth posture" below).
+    ? { payoutAddress: merchant.address, agentAuthMode: 'off', webhook: { url: 'https://acme.example/wh', secret: 'whsec_…' } }
     : null,
 });
 gateway.listen(4000);
@@ -34,14 +36,17 @@ The repo ships this as `npm run gateway:serve` / `gateway-serve:testnet` (`PORT`
 
 ## Thin client (merchant side)
 
-Your backend never imports `IsubClient`, a biller, a DB, or a signer — just the thin client:
+Your backend never imports `IsubClient`, a biller, a DB, or a signer — just the thin client.
+The proofless `use()` below assumes this tenant set `agentAuthMode:'off'` (as in the config above) —
+on a secure-by-default `'enforce'` tenant you must pass a 4th `proof` arg. See [Auth posture](#auth-posture-secure-by-default).
 
 ```typescript
 import { IsubServiceClient, verifyWebhook } from '@isubpay/sdk/client';
 
 const backend = new IsubServiceClient({ baseUrl: 'https://gateway…', apiKey: 'sk_…' });
 
-// meter a unit of usage — returns 200 served / 402 gated / 403 bad credential
+// meter a unit of usage — returns 200 served / 402 gated / 403 missing-or-invalid proof.
+// (no `proof` arg ⇒ requires this tenant to be agentAuthMode:'off' — see Auth posture below)
 const r = await backend.use(mandateId, 10_000_000n, 'req-1');
 if (r.status === 402) return deny('out of budget');
 
@@ -50,6 +55,19 @@ const st = await backend.status(mandateId);   // { serviceable, … } | null
 ```
 
 `use()` records usage idempotently (by `usageId`) and the gateway settles it on-chain per its policy. When the budget/rate is exhausted, `use()` returns **402** — your service simply stops serving; no chain call needed in the hot path.
+
+To report **raw quantities** instead of a pre-priced amount, configure the tenant with a `rateCard` and call `useMetered(mandateId, [{ meterKey, qty }], usageId)` — the gateway prices it on-chain and settles the frozen amount.
+
+## Auth posture (secure by default)
+
+The metered-report doors (`POST /usage`, `/usage-metered`) are **secure by default**: a tenant whose `agentAuthMode` is unset resolves to `'enforce'`, so a bare mandate id with no proof is rejected **403** (the mandate id is a *public* on-chain object — a bearer credential alone must not move money). Pick the mode per tenant:
+
+| Deployment | `routing.agentAuthMode` | Thin-client call |
+| --- | --- | --- |
+| **Trusted merchant backend** self-metering its own users (the api-key lives only on your server — the api-key *is* the trust boundary) | `'off'` | `use(mandateId, amount, usageId)` — no proof |
+| **Untrusted agent** reporting through a shared api-key (the agent must prove it owns the mandate) | `'enforce'` | `use(mandateId, amount, usageId, proof)` — pass an agent PoP |
+
+The proof is an agent **proof-of-possession**: a one-time per-call signature plus a subscriber-signed binding cert (`signCall` / `issueAgentCert` in `@isubpay/sdk`). The same `proof` parameter applies to `useMetered`. Pinned end-to-end across all four modes by `npm run managed-thinclient:smoke` (and the raw-HTTP door by `npm run agent-auth-http:redteam`).
 
 ## Webhooks
 
