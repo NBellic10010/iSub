@@ -1,17 +1,19 @@
-// REAL pay-as-you-go SERVICE — the merchant's paid Cortex MCP API. ANY caller presenting a VALID PAYG
-// mandate for this merchant (active, correct plan/merchant, within budget + rate cap) can use it; each
-// REAL request meters exactly that one call and settles charge_metered on-chain (keeper-signed,
-// authMode 'off' — works with a browser-checkout mandate, no agent cert), then returns the result.
+// REAL pay-as-you-go SERVICE — the merchant's paid Cortex API. SECURE BY DEFAULT: it ENFORCES an agent
+// proof-of-possession per call. A bare on-chain mandateId is PUBLIC, so it is a BEARER token, not a
+// credential — without a PoP, anyone who reads a victim's mandateId off-chain could drain its budget
+// (on-chain caps bound the loss to the cap, but the SERVICE is still stolen). So each request must carry
+// the agent's per-call signature (agentSig/agentSigNotAfter/agentCert in the body); a missing/invalid
+// proof → 403, an invalid/revoked/over-budget mandate → 402/403. Each accepted call meters exactly one
+// charge_metered on-chain (keeper-signed) and writes usage to the gateway db.
 //
-// The on-chain MANDATE is the authorization: there is NO mandate whitelist and NO timer. An invalid /
-// revoked / paused / over-budget mandate is refused per call (402/403). It writes usage+charges into
-// the gateway db so /app shows it live. Run ONE of these per merchant:
+// CORTEX_INSECURE_BEARER=1 downgrades to authMode 'off' (bare-mandateId, no PoP) — ONLY for a keyless
+// browser-checkout demo BEHIND a trusted session-auth front. It prints a loud warning; never expose raw.
 //   ISUB_NETWORK=testnet PORT=4500 npm run cortex-serve
-//   curl -X POST localhost:4500/web_search -H 'content-type: application/json' -d '{"mandateId":"0x..","query":"sui"}'
+//   curl -X POST localhost:4500/web_search -d '{"mandateId":"0x..","query":"sui","agentSig":"…","agentCert":{…}}'
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { IsubClient, keypairSigner } from '../src/index';
+import { IsubClient, keypairSigner, proofFromFields } from '../src/index';
 import { IsubService } from '../src/service';
 import { openDb } from '../src/db';
 import { sqlBillerStore } from '../src/sql-store';
@@ -56,9 +58,12 @@ async function main(): Promise<void> {
   const keeper = keypairSigner(loadOrCreateActor('keeper', NETWORK), client); // the plan's authorized_keeper settles
   const here = dirname(fileURLToPath(import.meta.url));
   const db = openDb(process.env.ISUB_INDEX_DB ?? join(here, '..', `isub-index.${NETWORK}.db`));
-  // agentAuth 'off' → keeper self-meters (no PoP/cert). The service validates each call against chain:
-  // mandate must be PAYG, for THIS merchant, active, and within budget — that's the whole authorization.
-  const svc = new IsubService(isub, keeper, merchant, sqlBillerStore(db, 'cortex-serve'), { windowMs: 3_600_000, agentAuth: 'off' });
+  // SECURE BY DEFAULT: enforce the agent PoP per call — a bare public mandateId is a BEARER token, not a
+  // credential. The on-chain caps bound funds, but the PoP is what stops theft-of-service. Opt out only
+  // via CORTEX_INSECURE_BEARER=1 (keyless caller behind a trusted session-auth front).
+  const INSECURE_BEARER = process.env.CORTEX_INSECURE_BEARER === '1';
+  const AUTH_MODE: 'off' | 'enforce' = INSECURE_BEARER ? 'off' : 'enforce';
+  const svc = new IsubService(isub, keeper, merchant, sqlBillerStore(db, 'cortex-serve'), { windowMs: 3_600_000, agentAuth: AUTH_MODE });
   const ex = explorer();
   let seq = 0;
 
@@ -76,11 +81,13 @@ async function main(): Promise<void> {
     req.on('end', () => {
       void (async () => {
         try {
-          const { mandateId, query } = JSON.parse(body || '{}') as { mandateId?: string; query?: string };
+          const parsed = JSON.parse(body || '{}') as { mandateId?: string; query?: string; agentSig?: unknown; agentSigNotAfter?: unknown; agentCert?: unknown };
+          const { mandateId, query } = parsed;
           if (!mandateId) return void send(res, 400, { error: 'body needs { mandateId, query }' });
           const price = SERVICES[service]!;
-          // Meter THIS call against the caller's mandate — any valid one is accepted, invalid refused.
-          const used = await svc.use(mandateId, price, `cortex-serve-${mandateId.slice(2, 10)}-${Date.now()}-${seq++}`, undefined, 'off');
+          // Meter THIS call — ENFORCE the agent PoP (proofFromFields reads agentSig/agentCert from the
+          // body) unless the operator explicitly opted into the insecure bearer mode.
+          const used = await svc.use(mandateId, price, `cortex-serve-${mandateId.slice(2, 10)}-${Date.now()}-${seq++}`, proofFromFields(parsed), AUTH_MODE);
           if (!used.ok) {
             console.log(`✗ ${service} ${mandateId.slice(0, 10)}… refused (${used.status}): ${used.reason}`);
             return void send(res, used.status, { error: used.reason });
@@ -105,9 +112,13 @@ async function main(): Promise<void> {
 
   server.listen(PORT, () => {
     console.log(`• Cortex PAYG service → http://localhost:${PORT}  (merchant ${merchant.slice(0, 12)}…, keeper ${keeper.address.slice(0, 10)}…)`);
-    console.log('  charges ANY valid PAYG mandate for this merchant, per real call — no whitelist, no timer');
+    if (INSECURE_BEARER) {
+      console.log('  ⚠️  CORTEX_INSECURE_BEARER=1 — authMode OFF: a bare public mandateId is served with NO PoP.');
+      console.log('  ⚠️  Anyone who reads a mandateId off-chain can drain its budget. Use ONLY behind a trusted session-auth front.');
+    } else {
+      console.log('  auth: ENFORCE — every call must carry an agent PoP (agentSig/agentCert); a bare mandateId → 403');
+    }
     console.log(`  services: ${Object.entries(SERVICES).map(([k, v]) => `${k} ${fmt(v)}`).join(' · ')}`);
-    console.log(`  curl -X POST localhost:${PORT}/web_search -H 'content-type: application/json' -d '{"mandateId":"0x..","query":"sui"}'`);
   });
 }
 

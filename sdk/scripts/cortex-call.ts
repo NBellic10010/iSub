@@ -1,6 +1,12 @@
 // Client for the Cortex PAYG service (cortex-serve): make ONE real call → the service charges ONE
 // on-chain payment against YOUR mandate. Run it once per use — the charge follows the call, nothing
-// automatic. Any valid PAYG mandate works; a revoked / over-budget one is refused by the service.
+// automatic. A revoked / over-budget mandate is refused by the service.
+//
+// NOTE: cortex-serve ENFORCES an agent proof-of-possession by default (a bare public mandateId is a
+// bearer token, not a credential). This keyless client sends only { mandateId, query }, so it works
+// against cortex-serve ONLY when that server runs with CORTEX_INSECURE_BEARER=1 (the keyless demo,
+// behind a trusted session-auth front). The secure path is an AGENT that signs each call — see the
+// x402-agent / isub-claude flows.
 //   ISUB_NETWORK=testnet npm run cortex-call -- 0x<mandateId> web_search "latest sui news"
 //   (point at a non-default service with --url http://host:port)
 const SERVICES = ['web_search', 'code_interpreter', 'vision'];
@@ -24,6 +30,12 @@ async function main(): Promise<void> {
     throw new Error(`can't reach the service at ${url} — is cortex-serve running? (${e instanceof Error ? e.message : e})`);
   }
   const j = (await r.json()) as { result?: string; charged?: string; spent?: string; budget?: string; settled?: boolean; explorer?: string; error?: string };
+  if (r.status === 403 && /proof|bearer/i.test(j.error ?? '')) {
+    throw new Error(
+      `cortex-serve requires an agent proof-of-possession (HTTP 403: ${j.error}). This keyless client sends no PoP — ` +
+        `run the server in keyless-demo mode (CORTEX_INSECURE_BEARER=1 npm run cortex-serve), or call it from an agent that signs each call (x402-agent / isub-claude).`,
+    );
+  }
   if (!r.ok) throw new Error(`payment refused (HTTP ${r.status}): ${j.error}`);
   const sui = (x?: string): string => (x ? (Number(x) / 1e9).toFixed(4) : '?');
   console.log(`\n✅ result: ${j.result}`);
