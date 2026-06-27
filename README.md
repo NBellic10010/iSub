@@ -57,6 +57,20 @@ iSub becomes load-bearing the moment you need anything a one-shot push can't giv
 
 Streaming payments (Sablier / Streamflow / Coindrip) are already crowded globally and relatively simple (lock + linear release); **non-custodial delegated-pull subscriptions are a gap on Sui — harder, and they hit a real pain point**. See the validation conclusions in `product-plan/concept.md`.
 
+## Pay-as-you-go (PAYG) — metered, per-call billing
+
+iSub's second mode — alongside **Fixed** subscriptions — is **PAYG: you pay for exactly what you use, per call, not a flat periodic fee.** It's the model for an AI agent hitting a paid API: a metered water-and-power bill, where the price of a call often isn't known until *after* it runs (tokens generated, compute used, rows returned).
+
+**How it works.** One **capped, revocable Mandate** authorizes metered pulls — **no pre-funding; the funds stay in the user's own withdrawable Account.** Each use is priced by a **`RateCard`** (multi-meter, exact bigint rationals — no floats — with per-meter rounding modes + `minCharge` floors, frozen at ingest so a later card edit can't re-price a recorded call), then settled on-chain via `charge_metered(seq)`. The contract enforces, **on every charge, before the money moves:** a **rate cap over a rolling window**, a **per-charge ceiling**, a **lifetime budget**, and **expiry** — and `charge_seq` makes each settle idempotent (a retried/replayed bill can't double-charge).
+
+**Why vanilla x402 `exact` can't express it.** An `exact` transfer is a *fixed* amount the buyer signs up front. PAYG is the opposite — a **standing, capped authorization the service pulls against per use, at a price computed at settlement.** That needs the mandate primitive. An agent drives it by presenting a cheap **off-chain proof-of-possession per call** — it never signs a fresh transfer, never holds the funds, never touches the user's keys. *N* metered calls become *N* capped pulls from the user's own account, bounded to exactly what was authorized.
+
+**Why it matters — the 3 a.m. retry storm.** With a card on file, a runaway agent's 100k calls clear a $4,000 charge you only see afterward. With a PAYG mandate — *"≤ X per window, ≤ Y total"* — the chain **refuses charge #N the instant it would breach the cap.** The worst a runaway can cost you is **exactly what you signed.**
+
+**Honest scope.** In the default settle-now config there is still **one on-chain `charge_metered` per call** (the *keeper's* tx, not the agent's — the agent stays gas-free); the biller can coalesce *N* calls into one charge via the window / `flushThresholdAmount` flush, trading the per-call digest for fewer txs. The on-chain guarantee is the **cap**; "only the bound agent, never a bearer" is the off-chain PoP gate (see [Agent proof-of-possession](#agent-proof-of-possession-two-signatures)).
+
+Code: `charge_metered` in [`contracts/sources/subscription.move`](contracts/sources/subscription.move) · pricing in [`sdk/src/pricing.ts`](sdk/src/pricing.ts) · metering + settlement in [`sdk/src/biller.ts`](sdk/src/biller.ts) / [`sdk/src/service.ts`](sdk/src/service.ts). Exercised by **`npm run payg:smoke`** (metered seq-idempotency · rate cap · refunds) and the metered x402 path (`x402:smoke`).
+
 ## Billing & anti-replay (money-correctness)
 
 The demo is the easy part; the hard part is being correct under failure. iSub gives three guarantees that separate a payment rail from a happy-path app:
