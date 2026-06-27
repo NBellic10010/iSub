@@ -91,7 +91,12 @@ export default function SubscriberDashboard() {
       setSubs(rows);
       if (id) {
         try {
-          setExposure(await accountExposure(isub, id, ids));
+          const exp = await accountExposure(isub, id, ids);
+          setExposure(exp);
+          // Keep the headline "iSub account" balance live off this SAME on-chain read (accountExposure
+          // already point-reads the account), so server-side keeper charges tick the balance DOWN on the
+          // 5s poll — not only on deposit/withdraw. Without this the headline froze while spentTotal rose.
+          setBalance(exp.balance);
         } catch {
           setExposure(null);
         }
