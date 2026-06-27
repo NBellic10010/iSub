@@ -26,7 +26,7 @@
 > - **Funds never leave the user's own wallet** — withdraw or revoke anytime.
 > - The payment rail for **both human subscriptions and the agent economy**.
 >
-> **Status:** live on **Sui testnet** (package `0xb11a3def…`) — Move contracts (**72/72** tests + multiple security self-reviews) · TS SDK + managed gateway/keeper/biller · **x402** — the standard **`exact`** scheme **and** a **`mandate`** pull-extension (buyer/seller/facilitator; a real on-chain testnet settlement) · **agent proof-of-possession** (replay/rollback-hardened) · a monthly **compliance CSV export** — all exercised by **real on-chain charges** and a failure-path test suite (lost-ack / crash / lock contention / replay). **AP2-aligned** (adapter planned, not yet shipped). Built for **Sui Overflow 2026**.
+> **Status:** live on **Sui testnet** (package `0xb11a3def…`) — Move contracts (**72/72** tests + multiple security self-reviews) · a TS SDK + managed gateway/keeper/biller that is a real **billing system, not just a charge call** — **metered PAYG pricing · a dunning lifecycle (past_due → recovered → lapsed) · journal↔chain reconciliation** · **x402** — the standard **`exact`** scheme **and** a **`mandate`** pull-extension (buyer/seller/facilitator; a real on-chain testnet settlement) · **agent proof-of-possession** (replay/rollback-hardened) · a monthly **compliance CSV export** — all exercised by **real on-chain charges** and a failure-path test suite (lost-ack / crash / lock contention / replay). **AP2-aligned** (adapter planned, not yet shipped). Built for **Sui Overflow 2026**.
 
 ## What it is
 
@@ -217,13 +217,17 @@ What separates this from a happy-path demo is the surface area below. Every item
 - **Storage reclamation** — `close_account` / `close_mandate` / `close_plan` (guarded: balance-0 / revoked-only) reclaim the storage rebate.
 - **12 audit events** — `MandateAuthorized`, `Charged{seq, spent_total, by}`, `Refunded`, … drive off-chain indexing.
 
-**Settlement & metering.** [`biller.ts`](sdk/src/biller.ts) · [`pricing.ts`](sdk/src/pricing.ts) · [`keeper.ts`](sdk/src/keeper.ts) · [`scheduler.ts`](sdk/src/scheduler.ts) — `recoverOrphan` / single-biller lock are in [Correctness under failure](#correctness-under-failure).
+**Settlement & metering — a billing system, not a one-shot charge.** This is iSub's off-chain depth and its clearest separation from a bare transfer (x402 `exact`) or a fixed per-period subscription. Three pieces a provider would otherwise build, audit, and *operate* themselves:
+
+> - **Metered PAYG pricing** — usage priced by a multi-meter `RateCard` in exact bigint rationals (no floats), frozen at ingest, charged against on-chain rate-window / per-charge / budget caps. Not a fixed per-period price: real pay-as-you-go.
+> - **Dunning lifecycle** — `active → past_due → recovered | lapsed`; a top-up recovers **permissionlessly** (auto-resume on the next tick, no re-sign), and bad debt is bounded to ≈ one period.
+> - **Reconciliation** — the keeper reconciles its off-chain journal against the on-chain `charge_seq` counter (no event indexer): it recovers landed-but-unacked charges (`recoverOrphan`, exactly-once across crashes) and flags externally-triggered charges (`charge.observed`). *Honest scope: this catches count-level drift at reconcile time; amount-level drift and a true cross-host mutex are tracked open in the self-audit — not claimed here.*
+
+[`biller.ts`](sdk/src/biller.ts) · [`pricing.ts`](sdk/src/pricing.ts) · [`reconcile.ts`](sdk/src/reconcile.ts) · [`keeper.ts`](sdk/src/keeper.ts) · [`scheduler.ts`](sdk/src/scheduler.ts) — `recoverOrphan` / single-biller lock are in [Correctness under failure](#correctness-under-failure); exercised by `npm run dunning:smoke` · `payg:smoke` · `biller:smoke` · `reconcile`.
 - **Pricing engine** — multi-meter rate cards in **exact bigint rationals** (no floats), per-meter rounding modes + `minCharge` floors, validated at startup so a bad card fails fast, not mid-billing.
 - **Price-freeze at ingest** — usage is priced once and the amount frozen; a later rate-card edit can never re-price a recorded call, so settlement and reconciliation stay consistent.
 - **Rate-card versioning + provenance** — each record stores `meterKey` / `qty` / `rateCardVersion` as **audit-only** fields, never a billing input.
-- **Dunning lifecycle** — `past_due` → grace window → `lapsed`; a top-up recovers **permissionlessly** (auto-resume, no re-sign).
 - **Failure classification** — deterministic abort (don't retry) vs transient RPC (back off) vs benign `EIntervalNotElapsed` (clock skew / a raced keeper).
-- **Drift detection** — the keeper reconciles externally-triggered permissionless Fixed charges by reading on-chain `charge_seq` (`charge.observed`), with no event indexer.
 - **Keeper interval math** — earliest = `max(last_charged + interval, not_before)` with a clock-skew margin; a `charge_seq` baseline makes ticks and restarts idempotent.
 - **Bounded-concurrency settlement** — `mapWithConcurrency` caps RPC fan-out so a large book can't self-DoS, and one mandate's failure is isolated from the batch.
 - **Carry-reason + budget events** — `budget_exhausted` / `rate_limited` / `insufficient_balance` / … plus a one-shot `budget.threshold` (default 80%), so a merchant can gate service precisely.
