@@ -7,11 +7,12 @@
 import type { AddressInfo } from 'node:net';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { IsubGateway } from '../src/gateway';
+import { IsubService } from '../src/service';
 import { openDb } from '../src/db';
 import { registerMerchant } from '../src/sql-store';
 import { issueAgentCert, signCall, payloadOf } from '../src/agent-auth';
 import { ChargeMode, MandateStatus } from '../src/constants';
-import type { BillerChain } from '../src/biller';
+import { memBillerStore, type BillerChain } from '../src/biller';
 import type { IsubSigner } from '../src/signer';
 import type { MandateState, AccountState } from '../src/types';
 
@@ -117,7 +118,52 @@ async function main(): Promise<void> {
   check(bearer2.status === 403, 'gateway with NO agentAuth anywhere: bearer → 403 (secure by default, not off)');
   srv2.close();
 
-  console.log(`\n✅ agent-auth HTTP red-team passed — ${checks} assertions (gateway HTTP door: legit 200 · bearer 403 · forged-cert 403 · secure-by-default 403).`);
+  // ===== GATEWAY human opt-out — the documented escape hatch still serves (pins the behavior change) =====
+  console.log('\n• GATEWAY human opt-out: tenant agentAuthMode=off → bearer still 200');
+  const db3 = openDb(':memory:');
+  registerMerchant(db3, { id: 'human', name: 'HumanCo', apiKey: 'sk_human', payoutAddress: PAYOUT });
+  const gw3 = new IsubGateway({
+    chain: new MockChain(),
+    keeperSigner,
+    db: db3,
+    policy: { windowMs: 999_999_000 },
+    routing: (mid) => (mid === 'human' ? { payoutAddress: PAYOUT, agentAuthMode: 'off' } : null),
+  });
+  const srv3 = gw3.listen(0);
+  const port3 = await new Promise<number>((r) => srv3.on('listening', () => r((srv3.address() as AddressInfo).port)));
+  const human = await fetch(`http://127.0.0.1:${port3}/usage`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-isub-api-key': 'sk_human', 'x-isub-mandate': 'M1' },
+    body: JSON.stringify({ amount: AMOUNT.toString(), usageId: 'human-1' }),
+  });
+  check(human.status === 200, 'gateway tenant agentAuthMode=off → bearer api-key call still 200 (human opt-out intact)');
+  srv3.close();
+
+  // ===== IsubService.listen() — the PRIMITIVE's own HTTP door is secure by default too =====
+  // (Residual hole the first secure-by-default fix MISSED: listen() called use() with no authMode →
+  //  inherited the permissive service 'off'. The re-audit reproduced a bearer→200; this pins the fix.)
+  console.log('\n• SERVICE.listen() door — bearer → 403 by default; PoP → 200; explicit off → 200');
+  const svcDoor = new IsubService(new MockChain(), keeperSigner, PAYOUT, memBillerStore(), { windowMs: 999_999_000 }); // NO agentAuth
+  const sd = svcDoor.listen(0);
+  const sdPort = await new Promise<number>((r) => sd.on('listening', () => r((sd.address() as AddressInfo).port)));
+  const postUse = (port: number, body: Record<string, unknown>): Promise<{ status: number }> =>
+    fetch(`http://127.0.0.1:${port}/use`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-isub-mandate': 'M1' }, body: JSON.stringify(body) });
+  const sdBearer = await postUse(sdPort, { amount: AMOUNT.toString(), usageId: 'sd-bearer' });
+  check(sdBearer.status === 403, 'service.listen() bearer (no PoP) → 403 (secure by default — primitive door now fixed)');
+  const naSd = BigInt(Date.now()) + 60_000n;
+  const certSd = await issueAgentCert(subscriberKp, { mandateId: 'M1', agent: agentKp.toSuiAddress(), notAfter: 0n, ver: 1 });
+  const { sig: sdSig } = await signCall(agentKp, { mandateId: 'M1', usageId: 'sd-ok', merchant: PAYOUT, payload: payloadOf(undefined, AMOUNT), notAfter: naSd });
+  const sdOk = await postUse(sdPort, { amount: AMOUNT.toString(), usageId: 'sd-ok', agentSig: sdSig, agentSigNotAfter: Number(naSd), agentCert: { agent: agentKp.toSuiAddress(), notAfter: '0', ver: 1, sig: certSd.sig } });
+  check(sdOk.status === 200, 'service.listen() valid PoP → 200 served');
+  sd.close();
+  const svcOff = new IsubService(new MockChain(), keeperSigner, PAYOUT, memBillerStore(), { windowMs: 999_999_000 });
+  const sd2 = svcOff.listen(0, { authMode: 'off' }); // explicit human opt-out
+  const sd2Port = await new Promise<number>((r) => sd2.on('listening', () => r((sd2.address() as AddressInfo).port)));
+  const sd2Bearer = await postUse(sd2Port, { amount: AMOUNT.toString(), usageId: 'sd-off' });
+  check(sd2Bearer.status === 200, 'service.listen({authMode:off}) → bearer 200 (explicit human opt-out)');
+  sd2.close();
+
+  console.log(`\n✅ agent-auth HTTP red-team passed — ${checks} assertions (gateway + service.listen HTTP doors: legit 200 · bearer 403 · forged-cert 403 · secure-by-default 403 · human opt-out 200).`);
   process.exit(0); // the per-tenant service window loop keeps the event loop alive
 }
 
