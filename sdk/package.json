@@ -75,6 +75,7 @@
     "cortex-serve": "NODE_OPTIONS=--experimental-sqlite tsx scripts/cortex-serve.ts",
     "cortex-serve:testnet": "ISUB_NETWORK=testnet NODE_OPTIONS=--experimental-sqlite tsx scripts/cortex-serve.ts",
     "cortex-call": "tsx scripts/cortex-call.ts",
+    "cortex:e2e": "NODE_OPTIONS=--experimental-sqlite tsx scripts/cortex-e2e.ts",
     "relations:smoke": "NODE_OPTIONS=--experimental-sqlite tsx scripts/relations-smoke.ts",
     "relations-http:smoke": "NODE_OPTIONS=--experimental-sqlite tsx scripts/relations-http-smoke.ts",
     "mock:seed": "NODE_OPTIONS=--experimental-sqlite tsx scripts/mock-seed.ts",

@@ -10,7 +10,10 @@
 // browser-checkout demo BEHIND a trusted session-auth front. It prints a loud warning; never expose raw.
 //   ISUB_NETWORK=testnet PORT=4500 npm run cortex-serve
 //   curl -X POST localhost:4500/web_search -d '{"mandateId":"0x..","query":"sui","agentSig":"…","agentCert":{…}}'
-import { createServer } from 'node:http';
+//
+// The HTTP server is built by the exported, dependency-injected `cortexServer()` so the e2e smoke can
+// drive the REAL handler over a MockChain (cortex-e2e.ts); main() wires the live IsubClient service.
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { IsubClient, keypairSigner, proofFromFields } from '../src/index';
@@ -45,9 +48,74 @@ async function runService(service: string, query: string): Promise<string> {
   return `analyzed input: ${query || '(no input)'}`;
 }
 
-function send(res: import('node:http').ServerResponse, status: number, body: unknown): void {
+function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json' });
   res.end(JSON.stringify(body));
+}
+
+/** Dependencies the cortex door needs — injected so the e2e can drive the REAL handler over a MockChain. */
+export interface CortexServerDeps {
+  /** The metering service (a real IsubService; in tests it wraps a MockChain). */
+  svc: Pick<IsubService, 'use' | 'flush'>;
+  /** Read the post-charge mandate state for the response. main() = isub.getMandate; e2e = MockChain. */
+  getMandate: (id: string) => Promise<{ spentTotal: bigint; totalBudget: bigint }>;
+  /** Per-call PoP policy. Default 'enforce'; CORTEX_INSECURE_BEARER=1 → 'off' (warned). */
+  authMode: 'off' | 'warn' | 'enforce';
+  services?: Record<string, bigint>;
+  txUrl?: (digest: string) => string;
+  log?: (msg: string) => void;
+}
+
+/** Build the Cortex PAYG HTTP server. The PoP gate is `svc.use(..., proofFromFields(body), authMode)`,
+ *  so the same enforce-by-default path the rest of the SDK tests covers gates every call here too. */
+export function cortexServer(deps: CortexServerDeps): Server {
+  const services = deps.services ?? SERVICES;
+  let seq = 0;
+  return createServer((req, res) => {
+    res.setHeader('access-control-allow-origin', '*');
+    res.setHeader('access-control-allow-headers', 'content-type');
+    res.setHeader('access-control-allow-methods', 'POST, OPTIONS');
+    if (req.method === 'OPTIONS') return void send(res, 204, {});
+    const service = (req.url ?? '').replace(/^\//, '').split('?')[0] ?? '';
+    if (req.method !== 'POST' || !(service in services)) {
+      return void send(res, 404, { error: `POST /<service> with {mandateId, query}; services: ${Object.keys(services).join(', ')}` });
+    }
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      void (async () => {
+        try {
+          const parsed = JSON.parse(body || '{}') as { mandateId?: string; query?: string; usageId?: string; agentSig?: unknown; agentSigNotAfter?: unknown; agentCert?: unknown };
+          const { mandateId, query } = parsed;
+          if (!mandateId) return void send(res, 400, { error: 'body needs { mandateId, query }' });
+          const price = services[service]!;
+          // The CLIENT supplies the usageId so its PoP signs over the SAME id the charge uses (and it
+          // dedups replays). Only the insecure/keyless mode lets the server mint one.
+          const usageId = typeof parsed.usageId === 'string' && parsed.usageId ? parsed.usageId : `cortex-serve-${mandateId.slice(2, 10)}-${Date.now()}-${seq++}`;
+          // Meter THIS call — ENFORCE the agent PoP (proofFromFields reads agentSig/agentCert from the
+          // body) unless the operator explicitly opted into the insecure bearer mode.
+          const used = await deps.svc.use(mandateId, price, usageId, proofFromFields(parsed), deps.authMode);
+          if (!used.ok) {
+            deps.log?.(`✗ ${service} ${mandateId.slice(0, 10)}… refused (${used.status}): ${used.reason}`);
+            return void send(res, used.status, { error: used.reason });
+          }
+          const result = await runService(service, query ?? '');
+          const fr = await deps.svc.flush(mandateId);
+          const charged = fr.reduce((s, f) => s + (f.charged ?? 0n), 0n);
+          const digest = fr.map((f) => f.digest).filter(Boolean)[0] ?? null;
+          const m = await deps.getMandate(mandateId);
+          deps.log?.(`✓ ${service} ${mandateId.slice(0, 10)}… charged ${fmt(charged)} → spent ${fmt(m.spentTotal)}/${fmt(m.totalBudget)}${digest ? `  ${digest.slice(0, 10)}…` : ' (carried)'}`);
+          send(res, 200, {
+            service, result,
+            charged: charged.toString(), spent: m.spentTotal.toString(), budget: m.totalBudget.toString(),
+            settled: digest != null, digest, explorer: digest && deps.txUrl ? deps.txUrl(digest) : null,
+          });
+        } catch (e) {
+          send(res, 500, { error: e instanceof Error ? e.message : String(e) });
+        }
+      })();
+    });
+  });
 }
 
 async function main(): Promise<void> {
@@ -59,57 +127,13 @@ async function main(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
   const db = openDb(process.env.ISUB_INDEX_DB ?? join(here, '..', `isub-index.${NETWORK}.db`));
   // SECURE BY DEFAULT: enforce the agent PoP per call — a bare public mandateId is a BEARER token, not a
-  // credential. The on-chain caps bound funds, but the PoP is what stops theft-of-service. Opt out only
-  // via CORTEX_INSECURE_BEARER=1 (keyless caller behind a trusted session-auth front).
+  // credential. Opt out only via CORTEX_INSECURE_BEARER=1 (keyless caller behind a trusted session-auth front).
   const INSECURE_BEARER = process.env.CORTEX_INSECURE_BEARER === '1';
   const AUTH_MODE: 'off' | 'enforce' = INSECURE_BEARER ? 'off' : 'enforce';
   const svc = new IsubService(isub, keeper, merchant, sqlBillerStore(db, 'cortex-serve'), { windowMs: 3_600_000, agentAuth: AUTH_MODE });
   const ex = explorer();
-  let seq = 0;
 
-  const server = createServer((req, res) => {
-    res.setHeader('access-control-allow-origin', '*');
-    res.setHeader('access-control-allow-headers', 'content-type');
-    res.setHeader('access-control-allow-methods', 'POST, OPTIONS');
-    if (req.method === 'OPTIONS') return void send(res, 204, {});
-    const service = (req.url ?? '').replace(/^\//, '').split('?')[0] ?? '';
-    if (req.method !== 'POST' || !(service in SERVICES)) {
-      return void send(res, 404, { error: `POST /<service> with {mandateId, query}; services: ${Object.keys(SERVICES).join(', ')}` });
-    }
-    let body = '';
-    req.on('data', (c) => (body += c));
-    req.on('end', () => {
-      void (async () => {
-        try {
-          const parsed = JSON.parse(body || '{}') as { mandateId?: string; query?: string; agentSig?: unknown; agentSigNotAfter?: unknown; agentCert?: unknown };
-          const { mandateId, query } = parsed;
-          if (!mandateId) return void send(res, 400, { error: 'body needs { mandateId, query }' });
-          const price = SERVICES[service]!;
-          // Meter THIS call — ENFORCE the agent PoP (proofFromFields reads agentSig/agentCert from the
-          // body) unless the operator explicitly opted into the insecure bearer mode.
-          const used = await svc.use(mandateId, price, `cortex-serve-${mandateId.slice(2, 10)}-${Date.now()}-${seq++}`, proofFromFields(parsed), AUTH_MODE);
-          if (!used.ok) {
-            console.log(`✗ ${service} ${mandateId.slice(0, 10)}… refused (${used.status}): ${used.reason}`);
-            return void send(res, used.status, { error: used.reason });
-          }
-          const result = await runService(service, query ?? '');
-          const fr = await svc.flush(mandateId);
-          const charged = fr.reduce((s, f) => s + (f.charged ?? 0n), 0n);
-          const digest = fr.map((f) => f.digest).filter(Boolean)[0] ?? null;
-          const m = await isub.getMandate(mandateId);
-          console.log(`✓ ${service} ${mandateId.slice(0, 10)}… charged ${fmt(charged)} → spent ${fmt(m.spentTotal)}/${fmt(m.totalBudget)}${digest ? `  ${digest.slice(0, 10)}…` : ' (carried)'}`);
-          send(res, 200, {
-            service, result,
-            charged: charged.toString(), spent: m.spentTotal.toString(), budget: m.totalBudget.toString(),
-            settled: digest != null, digest, explorer: digest ? ex.tx(digest) : null,
-          });
-        } catch (e) {
-          send(res, 500, { error: e instanceof Error ? e.message : String(e) });
-        }
-      })();
-    });
-  });
-
+  const server = cortexServer({ svc, getMandate: (id) => isub.getMandate(id), authMode: AUTH_MODE, txUrl: ex.tx, log: (m) => console.log(m) });
   server.listen(PORT, () => {
     console.log(`• Cortex PAYG service → http://localhost:${PORT}  (merchant ${merchant.slice(0, 12)}…, keeper ${keeper.address.slice(0, 10)}…)`);
     if (INSECURE_BEARER) {
@@ -122,7 +146,10 @@ async function main(): Promise<void> {
   });
 }
 
-main().catch((e) => {
-  console.error('\n✗ cortex-serve failed:', e instanceof Error ? e.message : e);
-  process.exit(1);
-});
+// Only run the server when invoked directly (not when imported by the e2e smoke).
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((e) => {
+    console.error('\n✗ cortex-serve failed:', e instanceof Error ? e.message : e);
+    process.exit(1);
+  });
+}
